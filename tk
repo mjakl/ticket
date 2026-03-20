@@ -794,10 +794,10 @@ cmd_closed() {
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
-    local files
-    files=$(printf '%s\n' "${TICKET_FILES[@]}" | xargs ls -t 2>/dev/null | head -n 100)
-    [[ -z "$files" ]] && return 0
-    echo "$files" | xargs awk '
+    local -a files=()
+    mapfile -t files < <(ls -t -- "${TICKET_FILES[@]}" | head -n 100)
+    [[ ${#files[@]} -eq 0 ]] && return 0
+    awk '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
@@ -818,7 +818,7 @@ cmd_closed() {
         if (prev_file) emit()
         for (i = 1; i <= count; i++) print output[i]
     }
-    ' | head -n "$limit"
+    ' "${files[@]}" | head -n "$limit"
 }
 
 ticket_outgoing_refs() {

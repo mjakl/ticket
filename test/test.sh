@@ -134,6 +134,27 @@ test_titles_with_pipe_render_in_ready_and_blocked() {
     rm -rf "$dir"
 }
 
+test_closed_works_in_paths_with_spaces() {
+    local base dir
+    base=$(new_workspace)
+    dir="$base/space dir"
+    mkdir -p "$dir"
+
+    run_in_dir "$dir" "$TK" create "Closed ticket"
+    assert_status 0
+    local id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" closed
+    assert_status 0
+    assert_contains "$id"
+    assert_contains "[closed] - Closed ticket"
+
+    rm -rf "$base"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -144,6 +165,7 @@ run_test() {
 main() {
     run_test test_frontmatter_parser_ignores_body_hr
     run_test test_titles_with_pipe_render_in_ready_and_blocked
+    run_test test_closed_works_in_paths_with_spaces
     echo
     echo "Passed: $PASS_COUNT"
 }
