@@ -102,6 +102,38 @@ EOF
     rm -rf "$dir"
 }
 
+test_titles_with_pipe_render_in_ready_and_blocked() {
+    local dir
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "A | B"
+    assert_status 0
+    local ready_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" ready
+    assert_status 0
+    assert_contains "$ready_id"
+    assert_contains "[P2][open] - A | B"
+
+    run_in_dir "$dir" "$TK" create "Blocker"
+    assert_status 0
+    local blocker_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" create "Needs | Blocker"
+    assert_status 0
+    local blocked_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" dep "$blocked_id" "$blocker_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" blocked
+    assert_status 0
+    assert_contains "$blocked_id"
+    assert_contains "[P2][open] - Needs | Blocker <- [$blocker_id]"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -111,6 +143,7 @@ run_test() {
 
 main() {
     run_test test_frontmatter_parser_ignores_body_hr
+    run_test test_titles_with_pipe_render_in_ready_and_blocked
     echo
     echo "Passed: $PASS_COUNT"
 }

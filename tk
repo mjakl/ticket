@@ -717,7 +717,7 @@ cmd_ready() {
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     awk '
-    BEGIN { FS=": "; in_front=0 }
+    BEGIN { FS=": "; in_front=0; sep=sprintf("%c", 31) }
     FNR==1 {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; priority=""; in_front=0
@@ -760,14 +760,14 @@ cmd_ready() {
                 }
             }
             if (ready) {
-                output[++count] = sprintf("%s|%s|%s|%s", priorities[id], id, status, titles[id])
+                output[++count] = priorities[id] sep id sep status sep titles[id]
             }
         }
 
         for (i = 1; i <= count; i++) {
             for (j = i + 1; j <= count; j++) {
-                split(output[i], a, "|")
-                split(output[j], b, "|")
+                split(output[i], a, sep)
+                split(output[j], b, sep)
                 if (a[1] > b[1] || (a[1] == b[1] && a[2] > b[2])) {
                     tmp = output[i]; output[i] = output[j]; output[j] = tmp
                 }
@@ -775,7 +775,7 @@ cmd_ready() {
         }
 
         for (i = 1; i <= count; i++) {
-            split(output[i], f, "|")
+            split(output[i], f, sep)
             printf "%-8s [P%s][%s] - %s\n", f[2], f[1], f[3], f[4]
         }
     }
@@ -931,7 +931,7 @@ cmd_blocked() {
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     awk '
-    BEGIN { FS=": "; in_front=0 }
+    BEGIN { FS=": "; in_front=0; sep=sprintf("%c", 31) }
     FNR==1 {
         if (prev_file) store()
         id=""; status=""; title=""; deps=""; priority=""; in_front=0
@@ -982,14 +982,14 @@ cmd_blocked() {
                         blockers = (blockers == "") ? dep : blockers ", " dep
                     }
                 }
-                output[++count] = sprintf("%s|%s|%s|%s|[%s]", priorities[id], id, status, titles[id], blockers)
+                output[++count] = priorities[id] sep id sep status sep titles[id] sep "[" blockers "]"
             }
         }
 
         for (i = 1; i <= count; i++) {
             for (j = i + 1; j <= count; j++) {
-                split(output[i], a, "|")
-                split(output[j], b, "|")
+                split(output[i], a, sep)
+                split(output[j], b, sep)
                 if (a[1] > b[1] || (a[1] == b[1] && a[2] > b[2])) {
                     tmp = output[i]; output[i] = output[j]; output[j] = tmp
                 }
@@ -997,7 +997,7 @@ cmd_blocked() {
         }
 
         for (i = 1; i <= count; i++) {
-            split(output[i], f, "|")
+            split(output[i], f, sep)
             printf "%-8s [P%s][%s] - %s <- %s\n", f[2], f[1], f[3], f[4], f[5]
         }
     }
