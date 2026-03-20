@@ -16,7 +16,6 @@ Commands:
     -d, --description      Description text
     --design               Design notes
     --acceptance           Acceptance criteria
-    -t, --type             Type (bug|feature|task|epic|chore) [default: task]
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
     --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)

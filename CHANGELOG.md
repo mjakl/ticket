@@ -19,6 +19,7 @@
 - JSON query support from the documented command surface
 - Link tracking (`link`/`unlink`, `links` metadata, and linked-ticket output)
 - Dependency cycle detection (`dep cycle`)
+- Ticket type metadata and the `--type` creation flag
 - Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed

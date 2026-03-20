@@ -240,7 +240,7 @@ cmd_create() {
     ensure_dir
 
     local title="" description="" design="" acceptance=""
-    local priority=2 issue_type="task" parent="" tags=""
+    local priority=2 parent="" tags=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
@@ -249,7 +249,6 @@ cmd_create() {
             --design) design="$2"; shift 2 ;;
             --acceptance) acceptance="$2"; shift 2 ;;
             -p|--priority) priority="$2"; shift 2 ;;
-            -t|--type) issue_type="$2"; shift 2 ;;
             --parent) parent="$2"; shift 2 ;;
             --tags) tags="$2"; shift 2 ;;
             -*) echo "Unknown option: $1" >&2; return 1 ;;
@@ -277,7 +276,6 @@ cmd_create() {
         echo "status: open"
         echo "deps: []"
         echo "created: $now"
-        echo "type: $issue_type"
         echo "priority: $priority"
         [[ -n "$parent" ]] && echo "parent: $parent"
         if [[ -n "$tags" ]]; then
@@ -1176,7 +1174,6 @@ Commands:
     -d, --description      Description text
     --design               Design notes
     --acceptance           Acceptance criteria
-    -t, --type             Type (bug|feature|task|epic|chore) [default: task]
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
     --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
