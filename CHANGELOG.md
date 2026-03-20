@@ -23,6 +23,7 @@
 - YAML field updates now modify frontmatter only
 - Dependency and link removal now match exact ticket IDs instead of substrings
 - Commands that scan tickets now handle empty `.tickets/` directories without failing
+- `dep` now rejects self-dependencies
 
 ## [0.3.2] - 2026-02-03
 

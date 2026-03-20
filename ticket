@@ -643,6 +643,11 @@ cmd_dep() {
     dep_file=$(ticket_path "$dep_id") || return 1
     dep_id=$(basename "$dep_file" .md)
 
+    if [[ "$(basename "$file" .md)" == "$dep_id" ]]; then
+        echo "Error: a ticket cannot depend on itself" >&2
+        return 1
+    fi
+
     # Get current deps
     local current_deps
     current_deps=$(yaml_field "$file" "deps")
