@@ -101,6 +101,12 @@ ensure_dir() {
     mkdir -p "$TICKETS_DIR"
 }
 
+load_ticket_files() {
+    shopt -s nullglob
+    TICKET_FILES=("$TICKETS_DIR"/*.md)
+    shopt -u nullglob
+}
+
 # Get ticket file path (supports partial ID matching)
 ticket_path() {
     local id="$1"
@@ -381,6 +387,9 @@ cmd_dep_tree() {
         root_id=$(basename "$root_file" .md)
     fi
 
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
+
     awk -v root_id="$root_id" -v full_mode="$full_mode" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
@@ -484,10 +493,16 @@ cmd_dep_tree() {
             if (!(extras[i] in rendered)) print_node(extras[i], "", "", 1, ":")
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
 cmd_dep_cycle() {
+    load_ticket_files
+    if [[ ${#TICKET_FILES[@]} -eq 0 ]]; then
+        echo "No dependency cycles found"
+        return 0
+    fi
+
     awk '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
@@ -595,7 +610,7 @@ cmd_dep_cycle() {
             }
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
 cmd_dep() {
@@ -654,6 +669,9 @@ cmd_ls() {
         esac
     done
 
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
+
     awk -v status_filter="$status_filter" -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
@@ -684,7 +702,7 @@ cmd_ls() {
             printf "%-8s [%s] - %s%s\n", id, status, title, dep_str
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
 cmd_tree() {
@@ -700,6 +718,9 @@ cmd_tree() {
         root_file=$(ticket_path "$1") || return 1
         root_id=$(basename "$root_file" .md)
     fi
+
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     awk -v target="$root_id" '
     BEGIN { FS=": "; in_front=0 }
@@ -793,7 +814,7 @@ cmd_tree() {
             if (!(extras[i] in printed)) print_node(extras[i], "", "", 1, ":")
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
 cmd_ready() {
@@ -805,6 +826,9 @@ cmd_ready() {
             *) shift ;;
         esac
     done
+
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     awk -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
@@ -878,7 +902,7 @@ cmd_ready() {
             printf "%-8s [P%s][%s] - %s\n", f[2], f[1], f[3], f[4]
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
 cmd_closed() {
@@ -893,8 +917,11 @@ cmd_closed() {
     done
 
     # List files by mtime (most recent first), filter closed, limit output
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
+
     local files
-    files=$(ls -t "$TICKETS_DIR"/*.md 2>/dev/null | head -n 100)
+    files=$(printf '%s\n' "${TICKET_FILES[@]}" | xargs ls -t 2>/dev/null | head -n 100)
     [[ -z "$files" ]] && return 0
     echo "$files" | xargs awk -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
@@ -968,6 +995,9 @@ cmd_blocked() {
             *) shift ;;
         esac
     done
+
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     awk -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
@@ -1050,7 +1080,7 @@ cmd_blocked() {
             printf "%-8s [P%s][%s] - %s <- %s\n", f[2], f[1], f[3], f[4], f[5]
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
 cmd_undep() {
@@ -1202,6 +1232,8 @@ cmd_show() {
     local target_id
     target_id=$(basename "$file" .md)
 
+    load_ticket_files
+
     _show_output() {
         awk -v target="$target_id" -v target_file="$file" '
     BEGIN { FS=": "; in_front=0 }
@@ -1334,7 +1366,7 @@ cmd_show() {
             }
         }
     }
-    ' "$TICKETS_DIR"/*.md 2>/dev/null
+    ' "${TICKET_FILES[@]}" 2>/dev/null
     }
 
     if [[ -t 1 && -n "$TICKET_PAGER" ]]; then
