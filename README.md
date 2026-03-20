@@ -10,6 +10,12 @@ Installation is just putting `tk` somewhere on your `PATH`.
 
 `tk` requires `bash`, so Linux, macOS, and Windows with WSL should be fine.
 
+Add something like this to your AGENTS.md:
+
+```
+You have a task manager (ticket system) available - `tk` (see `tk help` for details).
+```
+
 ## Usage
 
 ```bash
