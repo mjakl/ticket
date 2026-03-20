@@ -4,6 +4,7 @@
 
 ### Added
 - `prune` command to delete closed tickets
+- `delete <id>` command to remove one unreferenced ticket
 - `tree` command to show tickets in parent/child hierarchy, optionally focused on one ticket
 - `dep tree` now works without an ID and shows a global dependency hierarchy; repeated dependencies are marked as shared unless `--full` is used
 

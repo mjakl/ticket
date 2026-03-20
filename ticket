@@ -856,6 +856,26 @@ cmd_prune() {
     fi
 }
 
+cmd_delete() {
+    if [[ $# -ne 1 ]]; then
+        echo "Usage: $(basename "$0") delete <id>" >&2
+        return 1
+    fi
+
+    local file id refs
+    file=$(ticket_path "$1") || return 1
+    id=$(basename "$file" .md)
+    refs=$(ticket_references "$id")
+
+    if [[ -n "$refs" ]]; then
+        echo "Error: cannot delete $id ($(format_references "$refs"))" >&2
+        return 1
+    fi
+
+    rm -f "$file"
+    echo "Deleted $id"
+}
+
 cmd_blocked() {
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
@@ -1158,6 +1178,7 @@ Commands:
   blocked                  List open/in-progress tickets with unresolved deps
   closed [--limit=N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete all unreferenced closed tickets
+  delete <id>              Delete one unreferenced ticket
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
@@ -1189,6 +1210,7 @@ case "${1:-help}" in
     blocked) shift; cmd_blocked "$@" ;;
     closed) shift; cmd_closed "$@" ;;
     prune)  shift; cmd_prune "$@" ;;
+    delete) shift; cmd_delete "$@" ;;
     show)   shift; cmd_show "$@" ;;
     add-note) shift; cmd_add_note "$@" ;;
     help|--help|-h) cmd_help ;;
