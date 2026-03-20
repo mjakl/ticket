@@ -65,6 +65,29 @@ first_ticket_id() {
     basename "${files[0]}" .md
 }
 
+write_ticket_file() {
+    local dir="$1"
+    local id="$2"
+    local status="$3"
+    local title="$4"
+    local deps="${5:-[]}"
+    local priority="${6:-2}"
+    local parent="${7:-}"
+
+    mkdir -p "$dir/.tickets"
+    {
+        echo "---"
+        echo "id: $id"
+        echo "status: $status"
+        echo "deps: $deps"
+        echo "created: 2026-03-20T00:00:00Z"
+        echo "priority: $priority"
+        [[ -n "$parent" ]] && echo "parent: $parent"
+        echo "---"
+        echo "# $title"
+    } > "$dir/.tickets/$id.md"
+}
+
 test_frontmatter_parser_ignores_body_hr() {
     local dir
     dir=$(new_workspace)
@@ -266,6 +289,144 @@ EOF
     rm -rf "$dir"
 }
 
+test_create_show_and_status_flow() {
+    local dir id
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Core flow" -d "Initial body"
+    assert_status 0
+    id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "status: open"
+    assert_contains "# Core flow"
+    assert_contains "Initial body"
+
+    run_in_dir "$dir" "$TK" start "$id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "status: in_progress"
+
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "status: closed"
+
+    rm -rf "$dir"
+}
+
+test_dep_and_undep_flow() {
+    local dir blocker_id task_id
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Blocker"
+    assert_status 0
+    blocker_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" create "Task"
+    assert_status 0
+    task_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" dep "$task_id" "$blocker_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" show "$task_id"
+    assert_status 0
+    assert_contains "deps: [$blocker_id]"
+
+    run_in_dir "$dir" "$TK" undep "$task_id" "$blocker_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" show "$task_id"
+    assert_status 0
+    assert_contains "deps: []"
+
+    rm -rf "$dir"
+}
+
+test_partial_id_resolution_and_ambiguity() {
+    local dir
+    dir=$(new_workspace)
+
+    write_ticket_file "$dir" abc111 open "Alpha one"
+    write_ticket_file "$dir" abc222 open "Alpha two"
+    write_ticket_file "$dir" def333 open "Delta"
+
+    run_in_dir "$dir" "$TK" show def
+    assert_status 0
+    assert_contains "# Delta"
+
+    run_in_dir "$dir" "$TK" show abc
+    assert_status 1
+    assert_contains "Error: ambiguous ID 'abc' matches multiple tickets"
+
+    rm -rf "$dir"
+}
+
+test_delete_refuses_referenced_tickets() {
+    local dir blocker_id task_id
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Blocker"
+    assert_status 0
+    blocker_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" create "Task"
+    assert_status 0
+    task_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" dep "$task_id" "$blocker_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" delete "$blocker_id"
+    assert_status 1
+    assert_contains "Error: cannot delete $blocker_id"
+    assert_contains "dependency of $task_id"
+
+    rm -rf "$dir"
+}
+
+test_prune_keeps_reachable_closed_tickets() {
+    local dir blocker_id active_id orphan_id
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Retained blocker"
+    assert_status 0
+    blocker_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" create "Active task"
+    assert_status 0
+    active_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" dep "$active_id" "$blocker_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" close "$blocker_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" create "Orphan closed"
+    assert_status 0
+    orphan_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" close "$orphan_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" prune
+    assert_status 0
+    assert_contains "Retained $blocker_id"
+    assert_contains "Pruned $orphan_id"
+
+    [[ -f "$dir/.tickets/$blocker_id.md" ]] || fail "expected reachable closed ticket to be retained"
+    [[ ! -f "$dir/.tickets/$orphan_id.md" ]] || fail "expected orphan closed ticket to be pruned"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -281,6 +442,11 @@ main() {
     run_test test_create_validates_priority_range
     run_test test_create_retries_on_id_collision
     run_test test_parser_errors_are_not_suppressed
+    run_test test_create_show_and_status_flow
+    run_test test_dep_and_undep_flow
+    run_test test_partial_id_resolution_and_ambiguity
+    run_test test_delete_refuses_referenced_tickets
+    run_test test_prune_keeps_reachable_closed_tickets
     echo
     echo "Passed: $PASS_COUNT"
 }

@@ -48,6 +48,16 @@ Examples:
   tk dep publish-id changelog-id   # publish is blocked by changelog
 ```
 
+## Testing
+
+Run the regression suite from the repository root:
+
+```bash
+./test/test.sh
+```
+
+The tests use temporary workspaces and exercise the CLI end-to-end, including ticket creation, status updates, dependencies, pruning, partial ID resolution, and the known regression cases.
+
 ## Notes
 
 - Tickets are stored as Markdown files in `.tickets/`
