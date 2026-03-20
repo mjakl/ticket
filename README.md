@@ -37,7 +37,7 @@ cd ticket && ln -s "$PWD/ticket" ~/.local/bin/tk
 
 ## Requirements
 
-`tk` is a portable bash script requiring only coreutils, so it works out of the box on any POSIX system with bash installed. The `query` command requires `jq`. Uses `rg` (ripgrep) if available, falls back to `grep`.
+`tk` is a portable bash script requiring only coreutils, so it works out of the box on any POSIX system with bash installed. Uses `rg` (ripgrep) if available, falls back to `grep`.
 
 ## Agent Setup
 
@@ -83,53 +83,10 @@ Commands:
   closed [--limit=N] [-a X] [-T X] List recently closed tickets (default 20, by mtime)
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
-  super <cmd> [args]       Bypass plugins, run built-in command directly
-
-Bundled plugins (ticket-extras):
-  edit <id>                Open ticket in $EDITOR
-  ls|list [--status=X] [-a X] [-T X]   List tickets
-  query [jq-filter]        Output tickets as JSON, optionally filtered (requires jq)
-  migrate-beads            Import tickets from .beads/issues.jsonl (requires jq)
 
 Searches parent directories for .tickets/ (override with TICKETS_DIR env var)
 Supports partial ID matching (e.g., 'tk show 5c4' matches 'nw-5c46')
 ```
-
-## Plugins
-
-Executables named `tk-<cmd>` or `ticket-<cmd>` in your PATH are invoked automatically. This allows you to add custom commands or override built-in ones.
-
-```bash
-# Create a simple plugin
-cat > ~/.local/bin/tk-hello <<'EOF'
-#!/bin/bash
-# tk-plugin: Say hello
-echo "Hello from plugin!"
-EOF
-chmod +x ~/.local/bin/tk-hello
-
-# Now it's available
-tk hello        # runs tk-hello
-tk help         # lists it under "Plugins"
-```
-
-**Plugin descriptions** (shown in `tk help`):
-- Scripts: comment `# tk-plugin: description` in first 10 lines
-- Binaries: `--tk-describe` flag outputs `tk-plugin: description`
-
-**Plugin environment variables:**
-- `TICKETS_DIR` - path to the .tickets directory (may be empty)
-- `TK_SCRIPT` - absolute path to the tk script
-
-**Calling built-ins from plugins:**
-```bash
-#!/bin/bash
-# tk-plugin: Custom create with extras
-id=$("$TK_SCRIPT" super create "$@")
-echo "Created $id, doing extra stuff..."
-```
-
-Use `tk super <cmd>` to bypass plugins and run the built-in directly.
 
 ## Testing
 

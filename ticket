@@ -650,6 +650,53 @@ cmd_dep() {
     echo "Added dependency: $(basename "$file" .md) -> $dep_id"
 }
 
+cmd_ls() {
+    local status_filter="" assignee_filter="" tag_filter=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --status=*) status_filter="${1#--status=}"; shift ;;
+            -a) assignee_filter="$2"; shift 2 ;;
+            --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
+            -T) tag_filter="$2"; shift 2 ;;
+            --tag=*) tag_filter="${1#--tag=}"; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    awk -v status_filter="$status_filter" -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    BEGIN { FS=": "; in_front=0 }
+    FNR==1 {
+        if (prev_file) emit()
+        id=""; status=""; title=""; deps=""; assignee=""; tags=""; in_front=0
+        prev_file=FILENAME
+    }
+    /^---$/ { in_front = !in_front; next }
+    in_front && /^id:/ { id = $2 }
+    in_front && /^status:/ { status = $2 }
+    in_front && /^assignee:/ { assignee = $2 }
+    in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
+    in_front && /^deps:/ {
+        deps = $2
+        gsub(/[\[\] ]/, "", deps)
+    }
+    !in_front && /^# / && title == "" { title = substr($0, 3) }
+    END { if (prev_file) emit() }
+    function has_tag(tags_str, tag,    i, n, arr) {
+        n = split(tags_str, arr, ",")
+        for (i = 1; i <= n; i++) if (arr[i] == tag) return 1
+        return 0
+    }
+    function emit() {
+        if (id != "" && (status_filter == "" || status == status_filter) && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
+            deps_display = (deps != "") ? "[" deps "]" : "[]"
+            gsub(/,/, ", ", deps_display)
+            dep_str = (deps_display != "[]") ? " <- " deps_display : ""
+            printf "%-8s [%s] - %s%s\n", id, status, title, dep_str
+        }
+    }
+    ' "$TICKETS_DIR"/*.md 2>/dev/null
+}
+
 cmd_ready() {
     local assignee_filter="" tag_filter=""
     while [[ $# -gt 0 ]]; do
@@ -1222,41 +1269,6 @@ cmd_add_note() {
     echo "Note added to $(basename "$file" .md)"
 }
 
-# List installed plugins with descriptions
-# Scripts: # tk-plugin: description (comment in first 10 lines)
-# Binaries: --tk-describe flag outputs description
-_list_plugins() {
-    local seen="" plugin cmd desc path out
-
-    for prefix in tk ticket; do
-        while IFS= read -r plugin; do
-            [[ -z "$plugin" ]] && continue
-            cmd="${plugin#${prefix}-}"
-
-            # Skip if already seen (tk- takes precedence over ticket-)
-            case " $seen " in *" $cmd "*) continue ;; esac
-            seen="$seen $cmd"
-
-            path=$(command -v "$plugin" 2>/dev/null) || continue
-            [[ -f "$path" ]] || continue
-
-            desc=""
-            # Try comment first (fast, no execution)
-            desc=$(head -10 "$path" 2>/dev/null | grep -m1 '^# tk-plugin:' | sed 's/^# tk-plugin: *//')
-
-            # Fall back to --tk-describe for binaries (requires timeout command)
-            if [[ -z "$desc" ]] && command -v timeout &>/dev/null; then
-                if out=$(timeout 1 "$path" --tk-describe 2>/dev/null); then
-                    out=$(printf '%s' "$out" | head -1)
-                    [[ "$out" == "tk-plugin:"* ]] && desc="${out#tk-plugin: }"
-                fi
-            fi
-
-            printf "  %-22s %s\n" "$cmd" "${desc:-(no description)}"
-        done < <(compgen -c "${prefix}-" 2>/dev/null | sort -u)
-    done
-}
-
 cmd_help() {
     local cmd
     cmd=$(basename "$0")
@@ -1286,31 +1298,12 @@ Commands:
   undep <id> <dep-id>      Remove dependency
   link <id> <id> [id...]   Link tickets together (symmetric)
   unlink <id> <target-id>  Remove link between tickets
+  ls|list [--status=X] [-a X] [-T X]   List tickets
   ready [-a X] [-T X]      List open/in-progress tickets with deps resolved
   blocked [-a X] [-T X]    List open/in-progress tickets with unresolved deps
   closed [--limit=N] [-a X] [-T X] List recently closed tickets (default 20, by mtime)
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
-  super <cmd> [args]       Bypass plugins, run built-in command directly
-EOF
-
-    # List installed plugins
-    local plugins
-    plugins=$(_list_plugins 2>/dev/null)
-    if [[ -n "$plugins" ]]; then
-        cat << EOF
-
-Plugins (tk-<cmd> or ticket-<cmd> in PATH):
-$plugins
-EOF
-    fi
-
-    cat << EOF
-
-Use 'super' to bypass plugins. Plugins receive TICKETS_DIR and TK_SCRIPT
-env vars; use '\$TK_SCRIPT super <cmd>' to call built-ins.
-
-Plugin descriptions: comment '# tk-plugin: text' or --tk-describe flag
 
 Tickets stored as markdown files in .tickets/
 Supports partial ID matching (e.g., '$cmd show 5c4' matches 'nw-5c46')
@@ -1318,39 +1311,6 @@ EOF
 }
 
 # Main dispatch
-
-# Handle 'super' to bypass plugins
-_tk_super=0
-if [[ "${1:-}" == "super" ]]; then
-    _tk_super=1
-    shift
-fi
-
-# Check for plugin commands first (unless super mode)
-# Plugins are responsible for their own TICKETS_DIR handling
-if [[ $_tk_super -eq 0 && -n "${1:-}" && "${1:-}" != "help" && "${1:-}" != "--help" && "${1:-}" != "-h" ]]; then
-    for _prefix in tk ticket; do
-        _plugin="${_prefix}-$1"
-        if command -v "$_plugin" &>/dev/null; then
-            # Export context for plugins
-            if [[ -z "${TICKETS_DIR:-}" ]]; then
-                if _found=$(find_tickets_dir 2>/dev/null); then
-                    TICKETS_DIR="$_found"
-                fi
-            fi
-            if [[ -n "${TICKETS_DIR:-}" ]]; then
-                if [[ ! -d "$TICKETS_DIR" ]]; then
-                    echo "Error: tickets directory '$TICKETS_DIR' does not exist" >&2
-                    exit 1
-                fi
-                export TICKETS_DIR
-            fi
-            export TK_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
-            shift
-            exec "$_plugin" "$@"
-        fi
-    done
-fi
 
 # Initialize tickets dir for built-in commands (skip for help)
 case "${1:-help}" in
@@ -1369,6 +1329,7 @@ case "${1:-help}" in
     undep)  shift; cmd_undep "$@" ;;
     link)   shift; cmd_link "$@" ;;
     unlink) shift; cmd_unlink "$@" ;;
+    ls|list) shift; cmd_ls "$@" ;;
     ready)  shift; cmd_ready "$@" ;;
     blocked) shift; cmd_blocked "$@" ;;
     closed) shift; cmd_closed "$@" ;;
