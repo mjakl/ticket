@@ -1,8 +1,8 @@
-# ticket
+# ticket (tk)
 
-This is a customized, simplified fork of the original `ticket` project. It is tailored to my own workflow and probably has little or no value for other people.
+`tk` allows your agent to manage tasks in a structured way on disk. It stores tickets as simple files and lets you link them either as subtasks or as dependencies. That gives your agent enough information to determine a good next ticket to work on, while keeping a clear place to collect and organize tasks. You can track the tickets in git or keep them out of version control - that's up to you (I prefer not to track them).
 
-`tk` is a small git-friendly issue tracker that stores tickets as Markdown files with YAML frontmatter in `.tickets/`.
+[beads](https://github.com/steveyegge/beads), [beans](https://github.com/hmans/beans), and [the original `ticket` project](https://github.com/wedow/ticket) are onto something: letting agents manage tasks in a structured way has real merits. I just found those tools to be more than I needed for my own workflow.
 
 ## Usage
 
@@ -33,8 +33,13 @@ Commands:
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
-Searches parent directories for .tickets/ (override with TICKETS_DIR env var)
-Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
+Create work with 'tk create "Title"' and optionally group it under a larger task with '--parent <id>' to model a subtask. Use 'tk dep <id> <dep-id>' when one ticket is blocked by another ticket and cannot be completed first. In other words, A -> B means ticket A depends on B. Use parent/child links to describe breakdown of work, and dependency links to describe execution order or blocking relationships.
+
+Examples:
+  tk create "Ship release notes"
+  tk create "Draft changelog" --parent abc123
+  tk create "Publish GitHub release" --parent abc123
+  tk dep publish-id changelog-id   # publish is blocked by changelog
 ```
 
 ## Notes
@@ -42,6 +47,7 @@ Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
 - Tickets are stored as Markdown files in `.tickets/`
 - Set `TICKETS_DIR` to use a different ticket directory
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
+- Supports partial ID matching (e.g. `tk show 1a2` matches `1a2b3c`)
 - `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
 - `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
@@ -49,7 +55,7 @@ Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
 
 ## Upstream
 
-This project is based on/forked from https://github.com/wedow/ticket.
+This is a customized, simplified fork of the [original `ticket` project](https://github.com/wedow/ticket). It is tailored to my own workflow and may or may not be useful to others.
 
 ## License
 

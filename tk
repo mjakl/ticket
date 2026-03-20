@@ -1226,8 +1226,13 @@ Commands:
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
-Tickets stored as markdown files in .tickets/
-Supports partial ID matching (e.g., '$cmd show 1a2' matches '1a2b3c')
+Create work with '$cmd create "Title"' and optionally group it under a larger task with '--parent <id>' to model a subtask. Use '$cmd dep <id> <dep-id>' when one ticket is blocked by another ticket and cannot be completed first. In other words, A -> B means ticket A depends on B. Use parent/child links to describe breakdown of work, and dependency links to describe execution order or blocking relationships.
+
+Examples:
+  $cmd create "Ship release notes"
+  $cmd create "Draft changelog" --parent abc123
+  $cmd create "Publish GitHub release" --parent abc123
+  $cmd dep publish-id changelog-id   # publish is blocked by changelog
 EOF
 }
 
