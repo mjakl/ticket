@@ -158,10 +158,7 @@ cmd_create() {
     ensure_dir
 
     local title="" description="" design="" acceptance=""
-    local priority=2 issue_type="task" assignee="" external_ref="" parent="" tags=""
-
-    # Default assignee to git user.name if available
-    assignee=$(git config user.name 2>/dev/null || true)
+    local priority=2 issue_type="task" parent="" tags=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
@@ -171,8 +168,6 @@ cmd_create() {
             --acceptance) acceptance="$2"; shift 2 ;;
             -p|--priority) priority="$2"; shift 2 ;;
             -t|--type) issue_type="$2"; shift 2 ;;
-            -a|--assignee) assignee="$2"; shift 2 ;;
-            --external-ref) external_ref="$2"; shift 2 ;;
             --parent) parent="$2"; shift 2 ;;
             --tags) tags="$2"; shift 2 ;;
             -*) echo "Unknown option: $1" >&2; return 1 ;;
@@ -203,8 +198,6 @@ cmd_create() {
         echo "created: $now"
         echo "type: $issue_type"
         echo "priority: $priority"
-        [[ -n "$assignee" ]] && echo "assignee: $assignee"
-        [[ -n "$external_ref" ]] && echo "external-ref: $external_ref"
         [[ -n "$parent" ]] && echo "parent: $parent"
         if [[ -n "$tags" ]]; then
             echo "tags: [${tags//,/, }]"
@@ -651,29 +644,26 @@ cmd_dep() {
 }
 
 cmd_ls() {
-    local status_filter="" assignee_filter="" tag_filter=""
+    local status_filter="" tag_filter=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --status=*) status_filter="${1#--status=}"; shift ;;
-            -a) assignee_filter="$2"; shift 2 ;;
-            --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
             *) shift ;;
         esac
     done
 
-    awk -v status_filter="$status_filter" -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    awk -v status_filter="$status_filter" -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
-        id=""; status=""; title=""; deps=""; assignee=""; tags=""; in_front=0
+        id=""; status=""; title=""; deps=""; tags=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
-    in_front && /^assignee:/ { assignee = $2 }
     in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     in_front && /^deps:/ {
         deps = $2
@@ -687,7 +677,7 @@ cmd_ls() {
         return 0
     }
     function emit() {
-        if (id != "" && (status_filter == "" || status == status_filter) && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
+        if (id != "" && (status_filter == "" || status == status_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
             deps_display = (deps != "") ? "[" deps "]" : "[]"
             gsub(/,/, ", ", deps_display)
             dep_str = (deps_display != "[]") ? " <- " deps_display : ""
@@ -698,29 +688,26 @@ cmd_ls() {
 }
 
 cmd_ready() {
-    local assignee_filter="" tag_filter=""
+    local tag_filter=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -a) assignee_filter="$2"; shift 2 ;;
-            --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
             *) shift ;;
         esac
     done
 
-    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    awk -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
-        id=""; status=""; title=""; deps=""; priority=""; assignee=""; tags=""; in_front=0
+        id=""; status=""; title=""; deps=""; priority=""; tags=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^priority:/ { priority = $2 }
-    in_front && /^assignee:/ { assignee = $2 }
     in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     in_front && /^deps:/ {
         deps = $2
@@ -738,7 +725,6 @@ cmd_ready() {
             titles[id] = title
             deps_raw[id] = deps
             priorities[id] = (priority != "") ? priority : 2
-            assignees[id] = assignee
             all_tags[id] = tags
         }
     }
@@ -748,7 +734,6 @@ cmd_ready() {
         for (id in statuses) {
             status = statuses[id]
             if (status != "open" && status != "in_progress") continue
-            if (assignee_filter != "" && assignees[id] != assignee_filter) continue
             if (tag_filter != "" && !has_tag(all_tags[id], tag_filter)) continue
 
             deps = deps_raw[id]
@@ -788,12 +773,10 @@ cmd_ready() {
 }
 
 cmd_closed() {
-    local limit=20 assignee_filter="" tag_filter=""
+    local limit=20 tag_filter=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --limit=*) limit="${1#--limit=}"; shift ;;
-            -a) assignee_filter="$2"; shift 2 ;;
-            --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
             *) shift ;;
@@ -804,17 +787,16 @@ cmd_closed() {
     local files
     files=$(ls -t "$TICKETS_DIR"/*.md 2>/dev/null | head -n 100)
     [[ -z "$files" ]] && return 0
-    echo "$files" | xargs awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    echo "$files" | xargs awk -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
-        id=""; status=""; title=""; assignee=""; tags=""; in_front=0
+        id=""; status=""; title=""; tags=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
-    in_front && /^assignee:/ { assignee = $2 }
     in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
     function has_tag(tags_str, tag,    i, n, arr) {
@@ -823,7 +805,7 @@ cmd_closed() {
         return 0
     }
     function emit() {
-        if (id != "" && (status == "closed" || status == "done") && (assignee_filter == "" || assignee == assignee_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
+        if (id != "" && (status == "closed" || status == "done") && (tag_filter == "" || has_tag(tags, tag_filter))) {
             output[++count] = sprintf("%-8s [%s] - %s", id, status, title)
         }
     }
@@ -835,29 +817,26 @@ cmd_closed() {
 }
 
 cmd_blocked() {
-    local assignee_filter="" tag_filter=""
+    local tag_filter=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -a) assignee_filter="$2"; shift 2 ;;
-            --assignee=*) assignee_filter="${1#--assignee=}"; shift ;;
             -T) tag_filter="$2"; shift 2 ;;
             --tag=*) tag_filter="${1#--tag=}"; shift ;;
             *) shift ;;
         esac
     done
 
-    awk -v assignee_filter="$assignee_filter" -v tag_filter="$tag_filter" '
+    awk -v tag_filter="$tag_filter" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
-        id=""; status=""; title=""; deps=""; priority=""; assignee=""; tags=""; in_front=0
+        id=""; status=""; title=""; deps=""; priority=""; tags=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^priority:/ { priority = $2 }
-    in_front && /^assignee:/ { assignee = $2 }
     in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     in_front && /^deps:/ {
         deps = $2
@@ -875,7 +854,6 @@ cmd_blocked() {
             titles[id] = title
             deps_raw[id] = deps
             priorities[id] = (priority != "") ? priority : 2
-            assignees[id] = assignee
             all_tags[id] = tags
         }
     }
@@ -885,7 +863,6 @@ cmd_blocked() {
         for (id in statuses) {
             status = statuses[id]
             if (status != "open" && status != "in_progress") continue
-            if (assignee_filter != "" && assignees[id] != assignee_filter) continue
             if (tag_filter != "" && !has_tag(all_tags[id], tag_filter)) continue
 
             deps = deps_raw[id]
@@ -1284,8 +1261,6 @@ Commands:
     --acceptance           Acceptance criteria
     -t, --type             Type (bug|feature|task|epic|chore) [default: task]
     -p, --priority         Priority 0-4, 0=highest [default: 2]
-    -a, --assignee         Assignee
-    --external-ref         External reference (e.g., gh-123, JIRA-456)
     --parent               Parent ticket ID
     --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
   start <id>               Set status to in_progress
@@ -1298,10 +1273,10 @@ Commands:
   undep <id> <dep-id>      Remove dependency
   link <id> <id> [id...]   Link tickets together (symmetric)
   unlink <id> <target-id>  Remove link between tickets
-  ls|list [--status=X] [-a X] [-T X]   List tickets
-  ready [-a X] [-T X]      List open/in-progress tickets with deps resolved
-  blocked [-a X] [-T X]    List open/in-progress tickets with unresolved deps
-  closed [--limit=N] [-a X] [-T X] List recently closed tickets (default 20, by mtime)
+  ls|list [--status=X] [-T X]   List tickets
+  ready [-T X]             List open/in-progress tickets with deps resolved
+  blocked [-T X]           List open/in-progress tickets with unresolved deps
+  closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 

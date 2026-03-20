@@ -1,8 +1,6 @@
 # ticket
 
-The git-backed issue tracker for AI agents. Rooted in the Unix Philosophy, `tk` is inspired by Joe Armstrong's [Minimal Viable Program](https://joearms.github.io/published/2014-06-25-minimal-viable-program.html) with additional quality of life features for managing and querying against complex issue dependency graphs.
-
-`tk` was written as a full replacement for [beads](https://github.com/steveyegge/beads). It shares many similar commands but without the need for keeping a SQLite file in sync or a rogue background daemon mangling your changes. It ships with a `migrate-beads` command to make this a smooth transition.
+The git-backed issue tracker for AI agents. Rooted in the Unix Philosophy, `tk` is inspired by Joe Armstrong's [Minimal Viable Program](https://joearms.github.io/published/2014-06-25-minimal-viable-program.html) with a few quality-of-life features for managing ticket relationships.
 
 Tickets are markdown files with YAML frontmatter in `.tickets/`. This allows AI agents to easily search them for relevant content without dumping ten thousand character JSONL lines into their context window.
 
@@ -63,8 +61,6 @@ Commands:
     --acceptance           Acceptance criteria
     -t, --type             Type (bug|feature|task|epic|chore) [default: task]
     -p, --priority         Priority 0-4, 0=highest [default: 2]
-    -a, --assignee         Assignee [default: git user.name]
-    --external-ref         External reference (e.g., gh-123, JIRA-456)
     --parent               Parent ticket ID
     --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
   start <id>               Set status to in_progress
@@ -77,10 +73,10 @@ Commands:
   undep <id> <dep-id>      Remove dependency
   link <id> <id> [id...]   Link tickets together (symmetric)
   unlink <id> <target-id>  Remove link between tickets
-  ls|list [--status=X] [-a X] [-T X]   List tickets
-  ready [-a X] [-T X]      List open/in-progress tickets with deps resolved
-  blocked [-a X] [-T X]    List open/in-progress tickets with unresolved deps
-  closed [--limit=N] [-a X] [-T X] List recently closed tickets (default 20, by mtime)
+  ls|list [--status=X] [-T X]   List tickets
+  ready [-T X]             List open/in-progress tickets with deps resolved
+  blocked [-T X]           List open/in-progress tickets with unresolved deps
+  closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
@@ -97,30 +93,6 @@ If you have `uv` [installed](https://docs.astral.sh/uv/getting-started/installat
 ```sh
 make test
 ```
-
-## Migrating from Beads
-
-```bash
-tk migrate-beads
-
-# review new files if you like
-git status
-
-# check state matches expectations
-tk ready
-tk blocked
-
-# compare against
-bd ready
-bd blocked
-
-# all good, let's go
-git rm -rf .beads
-git add .tickets
-git commit -am "ditch beads"
-```
-
-For a thorough system-wide Beads cleanup, see [banteg's uninstall script](https://gist.github.com/banteg/1a539b88b3c8945cd71e4b958f319d8d).
 
 ## License
 

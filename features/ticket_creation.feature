@@ -33,16 +33,6 @@ Feature: Ticket Creation
     Then the command should succeed
     And the created ticket should have field "priority" with value "0"
 
-  Scenario: Create a ticket with assignee
-    When I run "ticket create 'Assigned ticket' -a 'John Doe'"
-    Then the command should succeed
-    And the created ticket should have field "assignee" with value "John Doe"
-
-  Scenario: Create a ticket with external reference
-    When I run "ticket create 'External ticket' --external-ref 'JIRA-123'"
-    Then the command should succeed
-    And the created ticket should have field "external-ref" with value "JIRA-123"
-
   Scenario: Create a ticket with parent
     Given a ticket exists with ID "parent-001" and title "Parent ticket"
     When I run "ticket create 'Child ticket' --parent parent-001"
