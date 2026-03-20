@@ -17,6 +17,7 @@
 - Plugin dispatch and the `super` command
 - Beads migration support and related README content
 - JSON query support from the documented command surface
+- Link tracking (`link`/`unlink`, `links` metadata, and linked-ticket output)
 - Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed

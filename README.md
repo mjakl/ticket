@@ -28,8 +28,6 @@ Commands:
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   dep cycle                Find dependency cycles in open tickets
   undep <id> <dep-id>      Remove dependency
-  link <id> <id> [id...]   Link tickets together (symmetric)
-  unlink <id> <target-id>  Remove link between tickets
   ls|list [--status=X] [-T X]   List tickets
   tree [id]                Show tickets in parent/child hierarchy
   ready [-T X]             List open/in-progress tickets with deps resolved
