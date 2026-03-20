@@ -1,6 +1,6 @@
 ---
 id: tic-0y5i
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-20T16:50:01Z
