@@ -77,23 +77,11 @@ _sed_i() {
     sed "$@" "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
-# Generate ticket ID from directory name + random string
+# Generate a random ticket ID
 generate_id() {
-    local dir_name
-    dir_name=$(basename "$(pwd)")
-
-    # Extract first letter of each hyphenated/underscored segment
-    local prefix
-    prefix=$(echo "$dir_name" | sed 's/[-_]/ /g' | awk '{for(i=1;i<=NF;i++) printf substr($i,1,1)}')
-
-    # Fallback to first 3 chars if single segment (prefix too short)
-    [[ ${#prefix} -lt 2 ]] && prefix="${dir_name:0:3}"
-
-    # 4-char random lower case alphanumeric string
     local hash
-    hash=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
-
-    echo "${prefix}-${hash}"
+    hash=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
+    echo "$hash"
 }
 
 # Ensure tickets directory exists
@@ -1117,7 +1105,7 @@ Commands:
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
 Tickets stored as markdown files in .tickets/
-Supports partial ID matching (e.g., '$cmd show 5c4' matches 'nw-5c46')
+Supports partial ID matching (e.g., '$cmd show 1a2' matches '1a2b3c')
 EOF
 }
 

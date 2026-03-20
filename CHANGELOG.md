@@ -11,6 +11,7 @@
 - Repositioned this repository as a customized, simplified fork focused on the single `ticket` bash script
 - Moved `ls`/`list` back into the core script
 - Simplified ticket creation and listing by removing assignee and external reference handling
+- Simplified ticket IDs so they are random and no longer derive prefixes from the current directory
 - Rewrote the README to match the reduced command surface and repository scope
 
 ### Removed

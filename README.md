@@ -33,7 +33,7 @@ Commands:
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
 Searches parent directories for .tickets/ (override with TICKETS_DIR env var)
-Supports partial ID matching (e.g., 'tk show 5c4' matches 'nw-5c46')
+Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
 ```
 
 ## Notes
