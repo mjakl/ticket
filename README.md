@@ -25,7 +25,7 @@ Commands:
   reopen <id>              Set status to open
   status <id> <status>     Update status (open|in_progress|closed)
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
-  dep tree [--full] <id>   Show dependency tree (--full disables dedup)
+  dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   dep cycle                Find dependency cycles in open tickets
   undep <id> <dep-id>      Remove dependency
   link <id> <id> [id...]   Link tickets together (symmetric)
@@ -47,6 +47,7 @@ Supports partial ID matching (e.g., 'tk show 5c4' matches 'nw-5c46')
 
 - Tickets are stored as Markdown files in `.tickets/`
 - The script walks parent directories to find `.tickets/`
+- `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## License

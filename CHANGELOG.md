@@ -5,6 +5,7 @@
 ### Added
 - `prune` command to delete all closed tickets
 - `tree` command to show tickets in parent/child hierarchy, optionally focused on one ticket
+- `dep tree` now works without an ID and shows a global dependency hierarchy; repeated dependencies are marked as shared unless `--full` is used
 
 ### Changed
 - Repositioned this repository as a customized, simplified fork focused on the single `ticket` bash script

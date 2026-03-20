@@ -364,16 +364,24 @@ cmd_dep_tree() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --full) full_mode=1; shift ;;
-            *) root_id="$1"; shift ;;
+            *)
+                if [[ -n "$root_id" ]]; then
+                    echo "Usage: $(basename "$0") dep tree [--full] [id]" >&2
+                    return 1
+                fi
+                root_id="$1"
+                shift
+                ;;
         esac
     done
 
-    if [[ -z "$root_id" ]]; then
-        echo "Usage: ticket dep tree [--full] <id>" >&2
-        return 1
+    if [[ -n "$root_id" ]]; then
+        local root_file
+        root_file=$(ticket_path "$root_id") || return 1
+        root_id=$(basename "$root_file" .md)
     fi
 
-    awk -v root_pattern="$root_id" -v full_mode="$full_mode" '
+    awk -v root_id="$root_id" -v full_mode="$full_mode" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
@@ -388,169 +396,92 @@ cmd_dep_tree() {
         gsub(/[\[\] ]/, "", deps)
     }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
-    function store() {
+
+    function store(    i, n) {
         if (id != "") {
             statuses[id] = status
             titles[id] = title
-            deps_str[id] = deps
+            deps_raw[id] = deps
             n = split(deps, arr, ",")
             for (i = 1; i <= n; i++) if (arr[i] != "") {
                 dep_count[id]++
                 dep_list[id, dep_count[id]] = arr[i]
+                reverse_count[arr[i]]++
             }
         }
     }
 
-    END {
-        if (prev_file) store()
-        # Resolve partial ID
-        root = ""
-        for (id in statuses) {
-            if (index(id, root_pattern) > 0) {
-                if (root != "") {
-                    print "Error: ambiguous ID " root_pattern > "/dev/stderr"
-                    exit 1
-                }
-                root = id
-            }
-        }
-        if (root == "") {
-            print "Error: ticket " root_pattern " not found" > "/dev/stderr"
-            exit 1
-        }
-
-        # Find max depths using iterative approach with stack
-        stack[1] = root; stack_depth[1] = 0; stack_path[1] = ":"
-        sp = 1
-        while (sp > 0) {
-            id = stack[sp]; depth = stack_depth[sp]; path = stack_path[sp]
-            sp--
-
-            if (!(id in statuses)) continue
-            if (index(path, ":" id ":") > 0) continue
-
-            if (!(id in max_depth) || depth > max_depth[id]) {
-                max_depth[id] = depth
-            }
-
-            new_path = path id ":"
-            for (i = dep_count[id]; i >= 1; i--) {
-                child = dep_list[id, i]
-                if (child != "") {
-                    sp++
-                    stack[sp] = child
-                    stack_depth[sp] = depth + 1
-                    stack_path[sp] = new_path
-                }
-            }
-        }
-
-        # Compute subtree depths (iterative post-order)
-        delete stack; delete stack_depth; delete stack_path
-        delete visited
-        stack[1] = root; stack_path[1] = ":"; stack_phase[1] = 0
-        sp = 1
-        while (sp > 0) {
-            id = stack[sp]; path = stack_path[sp]; phase = stack_phase[sp]
-
-            if (!(id in statuses) || index(path, ":" id ":") > 0) { sp--; continue }
-
-            if (phase == 0) {
-                # First visit: push children
-                stack_phase[sp] = 1
-                new_path = path id ":"
-                for (i = dep_count[id]; i >= 1; i--) {
-                    child = dep_list[id, i]
-                    if (child != "" && !(child in subtree_depth)) {
-                        sp++
-                        stack[sp] = child
-                        stack_path[sp] = new_path
-                        stack_phase[sp] = 0
-                    }
-                }
-            } else {
-                # Second visit: compute subtree depth
-                max_sub = max_depth[id]
-                for (i = 1; i <= dep_count[id]; i++) {
-                    child = dep_list[id, i]
-                    if (child in subtree_depth && subtree_depth[child] > max_sub) {
-                        max_sub = subtree_depth[child]
-                    }
-                }
-                subtree_depth[id] = max_sub
-                sp--
-            }
-        }
-
-        # Print tree (iterative with stack)
-        print root " [" statuses[root] "] " titles[root]
-        printed[root] = 1
-
-        delete stack
-        # Stack entries: id|depth|prefix|connector|path
-        # Start with root children
-        build_children(root, 0, "", "", ":" root ":")
-
-        while (print_sp > 0) {
-            id = print_stack_id[print_sp]
-            depth = print_stack_depth[print_sp]
-            prefix = print_stack_prefix[print_sp]
-            connector = print_stack_conn[print_sp]
-            path = print_stack_path[print_sp]
-            print_sp--
-
-            if (!(id in statuses)) continue
-            if (!full_mode && (id in printed)) continue
-            if (index(path, ":" id ":") > 0) continue
-            if (!full_mode && depth != max_depth[id]) continue
-
-            print prefix connector id " [" statuses[id] "] " titles[id]
-            if (!full_mode) printed[id] = 1
-
-            if (connector == "└── ") new_prefix = prefix "    "
-            else new_prefix = prefix "│   "
-
-            build_children(id, depth, new_prefix, connector, path id ":")
-        }
-    }
-
-    function build_children(id, depth, prefix, connector, path,    i, child, n, arr, sorted, j, tmp, min_idx) {
-        # Collect printable children
-        n = 0
-        for (i = 1; i <= dep_count[id]; i++) {
-            child = dep_list[id, i]
-            if (child == "") continue
-            if (!full_mode && (child in printed)) continue
-            if (!(child in max_depth)) continue
-            if (!full_mode && depth + 1 != max_depth[child]) continue
-            if (index(path, ":" child ":") > 0) continue
-            n++
-            arr[n] = child
-        }
-        if (n == 0) return
-
-        # Sort by subtree_depth, then by ticket ID (insertion sort)
+    function sort_values(arr, n,    i, j, tmp) {
         for (i = 2; i <= n; i++) {
             tmp = arr[i]
             j = i - 1
-            while (j >= 1 && (subtree_depth[arr[j]] > subtree_depth[tmp] || \
-                   (subtree_depth[arr[j]] == subtree_depth[tmp] && arr[j] > tmp))) {
+            while (j >= 1 && arr[j] > tmp) {
                 arr[j + 1] = arr[j]
                 j--
             }
             arr[j + 1] = tmp
         }
+    }
 
-        # Push to stack in reverse order (so first prints first)
-        for (i = n; i >= 1; i--) {
-            child = arr[i]
-            print_sp++
-            print_stack_id[print_sp] = child
-            print_stack_depth[print_sp] = depth + 1
-            print_stack_prefix[print_sp] = prefix
-            if (i == n) print_stack_conn[print_sp] = "└── "
-            else print_stack_conn[print_sp] = "├── "
-            print_stack_path[print_sp] = path
+    function print_node(id, prefix, connector, is_last, path,    i, n, child, arr, child_prefix) {
+        if (!(id in statuses)) return
+
+        if (index(path, ":" id ":") > 0) {
+            printf "%s%s%-8s [%s] - %s (cycle)\n", prefix, connector, id, statuses[id], titles[id]
+            return
+        }
+
+        if (!full_mode && (id in printed)) {
+            printf "%s%s%-8s [%s] - %s (shared)\n", prefix, connector, id, statuses[id], titles[id]
+            return
+        }
+
+        printf "%s%s%-8s [%s] - %s\n", prefix, connector, id, statuses[id], titles[id]
+        rendered[id] = 1
+        if (!full_mode) printed[id] = 1
+
+        n = 0
+        for (i = 1; i <= dep_count[id]; i++) {
+            child = dep_list[id, i]
+            if (child in statuses) arr[++n] = child
+        }
+        if (n == 0) return
+
+        sort_values(arr, n)
+        child_prefix = prefix
+        if (connector != "") child_prefix = prefix (is_last ? "    " : "│   ")
+        path = path id ":"
+
+        for (i = 1; i <= n; i++) {
+            print_node(arr[i], child_prefix, (i == n ? "└── " : "├── "), i == n, path)
+        }
+    }
+
+    END {
+        if (prev_file) store()
+
+        if (root_id != "") {
+            print_node(root_id, "", "", 1, ":")
+            exit
+        }
+
+        root_count = 0
+        for (id in statuses) {
+            if (!(id in reverse_count)) roots[++root_count] = id
+        }
+        sort_values(roots, root_count)
+
+        for (i = 1; i <= root_count; i++) {
+            print_node(roots[i], "", "", 1, ":")
+        }
+
+        extra_count = 0
+        for (id in statuses) {
+            if (!(id in rendered)) extras[++extra_count] = id
+        }
+        sort_values(extras, extra_count)
+        for (i = 1; i <= extra_count; i++) {
+            if (!(extras[i] in rendered)) print_node(extras[i], "", "", 1, ":")
         }
     }
     ' "$TICKETS_DIR"/*.md 2>/dev/null
@@ -682,7 +613,7 @@ cmd_dep() {
 
     if [[ $# -lt 2 ]]; then
         echo "Usage: ticket dep <id> <dependency-id>" >&2
-        echo "       ticket dep tree <id>  - show dependency tree" >&2
+        echo "       ticket dep tree [id]  - show dependency tree" >&2
         echo "       ticket dep cycle      - find dependency cycles" >&2
         return 1
     fi
@@ -1468,7 +1399,7 @@ Commands:
   reopen <id>              Set status to open
   status <id> <status>     Update status (open|in_progress|closed)
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
-  dep tree [--full] <id>   Show dependency tree (--full disables dedup)
+  dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   dep cycle                Find dependency cycles in open tickets
   undep <id> <dep-id>      Remove dependency
   link <id> <id> [id...]   Link tickets together (symmetric)
