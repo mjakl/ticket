@@ -4,6 +4,12 @@
 
 [beads](https://github.com/steveyegge/beads), [beans](https://github.com/hmans/beans), and [the original `ticket` project](https://github.com/wedow/ticket) are onto something: letting agents manage tasks in a structured way has real merits. I just found those tools to be more than I needed for my own workflow.
 
+## Installation
+
+Installation is just putting `tk` somewhere on your `PATH`.
+
+`tk` requires `bash`, so Linux, macOS, and Windows with WSL should be fine.
+
 ## Usage
 
 ```bash
