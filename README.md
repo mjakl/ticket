@@ -40,7 +40,8 @@ Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
 ## Notes
 
 - Tickets are stored as Markdown files in `.tickets/`
-- The script walks parent directories to find `.tickets/`
+- Set `TICKETS_DIR` to use a different ticket directory
+- The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
 - `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
 - `prune` and `delete` refuse to remove tickets that are still referenced via `deps` or `parent`
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
