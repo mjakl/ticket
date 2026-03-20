@@ -243,6 +243,29 @@ EOF
     rm -rf "$dir"
 }
 
+test_parser_errors_are_not_suppressed() {
+    local dir fake_bin
+    dir=$(new_workspace)
+    fake_bin="$dir/fake-bin"
+    mkdir -p "$fake_bin"
+
+    run_in_dir "$dir" "$TK" create "Visible error"
+    assert_status 0
+
+    cat > "$fake_bin/awk" <<'EOF'
+#!/usr/bin/env bash
+echo "awk exploded" >&2
+exit 23
+EOF
+    chmod +x "$fake_bin/awk"
+
+    run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" ls
+    assert_status 23
+    assert_contains "awk exploded"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -257,6 +280,7 @@ main() {
     run_test test_create_reports_missing_option_values
     run_test test_create_validates_priority_range
     run_test test_create_retries_on_id_collision
+    run_test test_parser_errors_are_not_suppressed
     echo
     echo "Passed: $PASS_COUNT"
 }

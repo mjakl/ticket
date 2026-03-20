@@ -101,7 +101,7 @@ ticket_path() {
 
     # Try partial match (anywhere in filename)
     local matches
-    matches=$(find "$TICKETS_DIR" -maxdepth 1 -name "*${id}*.md" 2>/dev/null | head -2)
+    matches=$(find "$TICKETS_DIR" -maxdepth 1 -name "*${id}*.md" | head -2)
     local count
     count=$(echo "$matches" | _grep -c . || true)
 
@@ -251,7 +251,7 @@ ticket_references() {
         END {
             if (prev_file) store()
         }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
 }
 
 format_references() {
@@ -562,7 +562,7 @@ cmd_dep_tree() {
             if (!(extras[i] in rendered)) print_node(extras[i], "", "", 1, ":")
         }
     }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
 }
 
 cmd_dep() {
@@ -646,7 +646,7 @@ cmd_ls() {
             printf "%-8s [%s] - %s%s\n", id, status, title, dep_str
         }
     }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
 }
 
 cmd_tree() {
@@ -759,7 +759,7 @@ cmd_tree() {
             if (!(extras[i] in printed)) print_node(extras[i], "", "", 1, ":")
         }
     }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
 }
 
 cmd_ready() {
@@ -829,7 +829,7 @@ cmd_ready() {
             printf "%-8s [P%s][%s] - %s\n", f[2], f[1], f[3], f[4]
         }
     }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
 }
 
 cmd_closed() {
@@ -1051,7 +1051,7 @@ cmd_blocked() {
             printf "%-8s [P%s][%s] - %s <- %s\n", f[2], f[1], f[3], f[4], f[5]
         }
     }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
 }
 
 cmd_undep() {
@@ -1216,7 +1216,7 @@ cmd_show() {
             }
         }
     }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
+    ' "${TICKET_FILES[@]}"
     }
 
     if [[ -t 1 && -n "$TICKET_PAGER" ]]; then
