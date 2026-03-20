@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- `prune` command to delete all closed tickets
+- `prune` command to delete closed tickets
 - `tree` command to show tickets in parent/child hierarchy, optionally focused on one ticket
 - `dep tree` now works without an ID and shows a global dependency hierarchy; repeated dependencies are marked as shared unless `--full` is used
 
@@ -31,6 +31,7 @@
 - Dependency and link removal now match exact ticket IDs instead of substrings
 - Commands that scan tickets now handle empty `.tickets/` directories without failing
 - `dep` now rejects self-dependencies
+- `prune` now skips closed tickets that are still referenced by another ticket
 
 ## [0.3.2] - 2026-02-03
 

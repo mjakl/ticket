@@ -216,6 +216,64 @@ array_remove() {
     [[ -z "$out" ]] && echo "[]" || echo "[$out]"
 }
 
+ticket_references() {
+    local target="$1"
+
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
+
+    awk -v target="$target" '
+        BEGIN { FS=": "; in_front=0 }
+        FNR==1 {
+            if (prev_file) store()
+            id=""; parent=""; deps=""; in_front=0
+            prev_file=FILENAME
+        }
+        /^---$/ { in_front = !in_front; next }
+        in_front && /^id:/ { id = $2 }
+        in_front && /^parent:/ { parent = $2 }
+        in_front && /^deps:/ {
+            deps = $2
+            gsub(/[\[\] ]/, "", deps)
+        }
+        function store(    i, n, dep) {
+            if (id == "") return
+            if (parent == target) printf "parent:%s\n", id
+            if (deps != "") {
+                n = split(deps, arr, ",")
+                for (i = 1; i <= n; i++) {
+                    dep = arr[i]
+                    if (dep == target) printf "dep:%s\n", id
+                }
+            }
+        }
+        END {
+            if (prev_file) store()
+        }
+    ' "${TICKET_FILES[@]}" 2>/dev/null
+}
+
+format_references() {
+    local refs="$1"
+    local ref out=""
+
+    while IFS= read -r ref; do
+        [[ -z "$ref" ]] && continue
+        case "$ref" in
+            dep:*)
+                [[ -n "$out" ]] && out+="; "
+                out+="dependency of ${ref#dep:}"
+                ;;
+            parent:*)
+                [[ -n "$out" ]] && out+="; "
+                out+="parent of ${ref#parent:}"
+                ;;
+        esac
+    done <<< "$refs"
+
+    printf '%s' "$out"
+}
+
 cmd_create() {
     ensure_dir
 
@@ -764,7 +822,7 @@ cmd_prune() {
     fi
 
     local -a files
-    local file status id count=0
+    local file status id refs count=0 skipped=0
 
     shopt -s nullglob
     files=("$TICKETS_DIR"/*.md)
@@ -779,15 +837,22 @@ cmd_prune() {
         status=$(yaml_field "$file" "status")
         [[ "$status" == "closed" ]] || continue
         id=$(basename "$file" .md)
+        refs=$(ticket_references "$id")
+        if [[ -n "$refs" ]]; then
+            echo "Skipped $id ($(format_references "$refs"))"
+            ((skipped += 1))
+            continue
+        fi
         rm -f "$file"
         echo "Pruned $id"
         ((count += 1))
     done
 
-    if [[ $count -eq 0 ]]; then
+    if [[ $count -eq 0 && $skipped -eq 0 ]]; then
         echo "No closed tickets to prune"
     else
-        echo "Pruned $count ticket(s)"
+        [[ $count -gt 0 ]] && echo "Pruned $count ticket(s)"
+        [[ $skipped -gt 0 ]] && echo "Skipped $skipped referenced ticket(s)"
     fi
 }
 
@@ -1092,7 +1157,7 @@ Commands:
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
   closed [--limit=N]       List recently closed tickets (default 20, by mtime)
-  prune                    Delete all closed tickets
+  prune                    Delete all unreferenced closed tickets
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
