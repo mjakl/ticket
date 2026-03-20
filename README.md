@@ -47,6 +47,10 @@ Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
+## Upstream
+
+This project is based on/forked from https://github.com/wedow/ticket.
+
 ## License
 
 MIT
