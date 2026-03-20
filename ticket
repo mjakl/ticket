@@ -69,14 +69,6 @@ _iso_date() {
     date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
-# Portable sed -i (BSD requires -i '', GNU uses -i)
-_sed_i() {
-    local file="$1"
-    shift
-    local tmp="${file}.tmp.$$"
-    sed "$@" "$file" > "$tmp" && mv "$tmp" "$file"
-}
-
 # Generate a random ticket ID
 generate_id() {
     local hash
@@ -754,7 +746,7 @@ cmd_closed() {
     in_front && /^status:/ { status = $2 }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
     function emit() {
-        if (id != "" && (status == "closed" || status == "done")) {
+        if (id != "" && status == "closed") {
             output[++count] = sprintf("%-8s [%s] - %s", id, status, title)
         }
     }
@@ -785,7 +777,7 @@ cmd_prune() {
 
     for file in "${files[@]}"; do
         status=$(yaml_field "$file" "status")
-        [[ "$status" == "closed" || "$status" == "done" ]] || continue
+        [[ "$status" == "closed" ]] || continue
         id=$(basename "$file" .md)
         rm -f "$file"
         echo "Pruned $id"

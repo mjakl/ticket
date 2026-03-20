@@ -23,6 +23,7 @@
 - Ticket type metadata and the `--type` creation flag
 - Tags, tag filters, and tag metadata
 - `--design` and `--acceptance` creation flags
+- Obsolete dead code and unused compatibility paths such as `_sed_i` and `done` status handling
 - Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed
