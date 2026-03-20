@@ -240,7 +240,7 @@ cmd_create() {
     ensure_dir
 
     local title="" description="" design="" acceptance=""
-    local priority=2 parent="" tags=""
+    local priority=2 parent=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
@@ -250,7 +250,6 @@ cmd_create() {
             --acceptance) acceptance="$2"; shift 2 ;;
             -p|--priority) priority="$2"; shift 2 ;;
             --parent) parent="$2"; shift 2 ;;
-            --tags) tags="$2"; shift 2 ;;
             -*) echo "Unknown option: $1" >&2; return 1 ;;
             *) title="$1"; shift ;;
         esac
@@ -278,9 +277,6 @@ cmd_create() {
         echo "created: $now"
         echo "priority: $priority"
         [[ -n "$parent" ]] && echo "parent: $parent"
-        if [[ -n "$tags" ]]; then
-            echo "tags: [${tags//,/, }]"
-        fi
         echo "---"
         echo "# $title"
         echo ""
@@ -538,12 +534,10 @@ cmd_dep() {
 }
 
 cmd_ls() {
-    local status_filter="" tag_filter=""
+    local status_filter=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --status=*) status_filter="${1#--status=}"; shift ;;
-            -T) tag_filter="$2"; shift 2 ;;
-            --tag=*) tag_filter="${1#--tag=}"; shift ;;
             *) shift ;;
         esac
     done
@@ -551,30 +545,24 @@ cmd_ls() {
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
-    awk -v status_filter="$status_filter" -v tag_filter="$tag_filter" '
+    awk -v status_filter="$status_filter" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
-        id=""; status=""; title=""; deps=""; tags=""; in_front=0
+        id=""; status=""; title=""; deps=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
-    in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     in_front && /^deps:/ {
         deps = $2
         gsub(/[\[\] ]/, "", deps)
     }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
     END { if (prev_file) emit() }
-    function has_tag(tags_str, tag,    i, n, arr) {
-        n = split(tags_str, arr, ",")
-        for (i = 1; i <= n; i++) if (arr[i] == tag) return 1
-        return 0
-    }
     function emit() {
-        if (id != "" && (status_filter == "" || status == status_filter) && (tag_filter == "" || has_tag(tags, tag_filter))) {
+        if (id != "" && (status_filter == "" || status == status_filter)) {
             deps_display = (deps != "") ? "[" deps "]" : "[]"
             gsub(/,/, ", ", deps_display)
             dep_str = (deps_display != "[]") ? " <- " deps_display : ""
@@ -697,56 +685,38 @@ cmd_tree() {
 }
 
 cmd_ready() {
-    local tag_filter=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -T) tag_filter="$2"; shift 2 ;;
-            --tag=*) tag_filter="${1#--tag=}"; shift ;;
-            *) shift ;;
-        esac
-    done
-
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
-    awk -v tag_filter="$tag_filter" '
+    awk '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
-        id=""; status=""; title=""; deps=""; priority=""; tags=""; in_front=0
+        id=""; status=""; title=""; deps=""; priority=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^priority:/ { priority = $2 }
-    in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     in_front && /^deps:/ {
         deps = $2
         gsub(/[\[\] ]/, "", deps)
     }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
-    function has_tag(tags_str, tag,    i, n, arr) {
-        n = split(tags_str, arr, ",")
-        for (i = 1; i <= n; i++) if (arr[i] == tag) return 1
-        return 0
-    }
     function store() {
         if (id != "") {
             statuses[id] = status
             titles[id] = title
             deps_raw[id] = deps
             priorities[id] = (priority != "") ? priority : 2
-            all_tags[id] = tags
         }
     }
     END {
         if (prev_file) store()
-        # Find ready tickets: active with all deps closed
         for (id in statuses) {
             status = statuses[id]
             if (status != "open" && status != "in_progress") continue
-            if (tag_filter != "" && !has_tag(all_tags[id], tag_filter)) continue
 
             deps = deps_raw[id]
             ready = 1
@@ -765,7 +735,6 @@ cmd_ready() {
             }
         }
 
-        # Sort by priority, then by id
         for (i = 1; i <= count; i++) {
             for (j = i + 1; j <= count; j++) {
                 split(output[i], a, "|")
@@ -785,42 +754,33 @@ cmd_ready() {
 }
 
 cmd_closed() {
-    local limit=20 tag_filter=""
+    local limit=20
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --limit=*) limit="${1#--limit=}"; shift ;;
-            -T) tag_filter="$2"; shift 2 ;;
-            --tag=*) tag_filter="${1#--tag=}"; shift ;;
             *) shift ;;
         esac
     done
 
-    # List files by mtime (most recent first), filter closed, limit output
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     local files
     files=$(printf '%s\n' "${TICKET_FILES[@]}" | xargs ls -t 2>/dev/null | head -n 100)
     [[ -z "$files" ]] && return 0
-    echo "$files" | xargs awk -v tag_filter="$tag_filter" '
+    echo "$files" | xargs awk '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
-        id=""; status=""; title=""; tags=""; in_front=0
+        id=""; status=""; title=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
-    in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
-    function has_tag(tags_str, tag,    i, n, arr) {
-        n = split(tags_str, arr, ",")
-        for (i = 1; i <= n; i++) if (arr[i] == tag) return 1
-        return 0
-    }
     function emit() {
-        if (id != "" && (status == "closed" || status == "done") && (tag_filter == "" || has_tag(tags, tag_filter))) {
+        if (id != "" && (status == "closed" || status == "done")) {
             output[++count] = sprintf("%-8s [%s] - %s", id, status, title)
         }
     }
@@ -866,56 +826,38 @@ cmd_prune() {
 }
 
 cmd_blocked() {
-    local tag_filter=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -T) tag_filter="$2"; shift 2 ;;
-            --tag=*) tag_filter="${1#--tag=}"; shift ;;
-            *) shift ;;
-        esac
-    done
-
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
-    awk -v tag_filter="$tag_filter" '
+    awk '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) store()
-        id=""; status=""; title=""; deps=""; priority=""; tags=""; in_front=0
+        id=""; status=""; title=""; deps=""; priority=""; in_front=0
         prev_file=FILENAME
     }
     /^---$/ { in_front = !in_front; next }
     in_front && /^id:/ { id = $2 }
     in_front && /^status:/ { status = $2 }
     in_front && /^priority:/ { priority = $2 }
-    in_front && /^tags:/ { tags = $2; gsub(/[\[\] ]/, "", tags) }
     in_front && /^deps:/ {
         deps = $2
         gsub(/[\[\] ]/, "", deps)
     }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
-    function has_tag(tags_str, tag,    i, n, arr) {
-        n = split(tags_str, arr, ",")
-        for (i = 1; i <= n; i++) if (arr[i] == tag) return 1
-        return 0
-    }
     function store() {
         if (id != "") {
             statuses[id] = status
             titles[id] = title
             deps_raw[id] = deps
             priorities[id] = (priority != "") ? priority : 2
-            all_tags[id] = tags
         }
     }
     END {
         if (prev_file) store()
-        # Find blocked tickets: active with at least one dep not closed
         for (id in statuses) {
             status = statuses[id]
             if (status != "open" && status != "in_progress") continue
-            if (tag_filter != "" && !has_tag(all_tags[id], tag_filter)) continue
 
             deps = deps_raw[id]
             if (deps == "") continue
@@ -930,7 +872,6 @@ cmd_blocked() {
                 }
             }
             if (blocked) {
-                # Build list of only open blockers
                 blockers = ""
                 n = split(deps, arr, ",")
                 for (i = 1; i <= n; i++) {
@@ -943,7 +884,6 @@ cmd_blocked() {
             }
         }
 
-        # Sort by priority, then by id
         for (i = 1; i <= count; i++) {
             for (j = i + 1; j <= count; j++) {
                 split(output[i], a, "|")
@@ -1176,7 +1116,6 @@ Commands:
     --acceptance           Acceptance criteria
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
-    --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
   start <id>               Set status to in_progress
   close <id>               Set status to closed
   reopen <id>              Set status to open
@@ -1184,11 +1123,11 @@ Commands:
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   undep <id> <dep-id>      Remove dependency
-  ls|list [--status=X] [-T X]   List tickets
+  ls|list [--status=X]     List tickets
   tree [id]                Show tickets in parent/child hierarchy
-  ready [-T X]             List open/in-progress tickets with deps resolved
-  blocked [-T X]           List open/in-progress tickets with unresolved deps
-  closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
+  ready                    List open/in-progress tickets with deps resolved
+  blocked                  List open/in-progress tickets with unresolved deps
+  closed [--limit=N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete all closed tickets
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)

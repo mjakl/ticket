@@ -18,7 +18,6 @@ Commands:
     --acceptance           Acceptance criteria
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
-    --tags                 Comma-separated tags (e.g., --tags ui,backend,urgent)
   start <id>               Set status to in_progress
   close <id>               Set status to closed
   reopen <id>              Set status to open
@@ -26,11 +25,11 @@ Commands:
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   undep <id> <dep-id>      Remove dependency
-  ls|list [--status=X] [-T X]   List tickets
+  ls|list [--status=X]     List tickets
   tree [id]                Show tickets in parent/child hierarchy
-  ready [-T X]             List open/in-progress tickets with deps resolved
-  blocked [-T X]           List open/in-progress tickets with unresolved deps
-  closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
+  ready                    List open/in-progress tickets with deps resolved
+  blocked                  List open/in-progress tickets with unresolved deps
+  closed [--limit=N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete all closed tickets
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)

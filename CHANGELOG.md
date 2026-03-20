@@ -20,6 +20,7 @@
 - Link tracking (`link`/`unlink`, `links` metadata, and linked-ticket output)
 - Dependency cycle detection (`dep cycle`)
 - Ticket type metadata and the `--type` creation flag
+- Tags, tag filters, and tag metadata
 - Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed
