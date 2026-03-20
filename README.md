@@ -31,6 +31,7 @@ Commands:
   link <id> <id> [id...]   Link tickets together (symmetric)
   unlink <id> <target-id>  Remove link between tickets
   ls|list [--status=X] [-T X]   List tickets
+  tree [id]                Show tickets in parent/child hierarchy
   ready [-T X]             List open/in-progress tickets with deps resolved
   blocked [-T X]           List open/in-progress tickets with unresolved deps
   closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)

@@ -756,6 +756,115 @@ cmd_ls() {
     ' "$TICKETS_DIR"/*.md 2>/dev/null
 }
 
+cmd_tree() {
+    local root_id=""
+
+    if [[ $# -gt 1 ]]; then
+        echo "Usage: $(basename "$0") tree [id]" >&2
+        return 1
+    fi
+
+    if [[ $# -eq 1 ]]; then
+        local root_file
+        root_file=$(ticket_path "$1") || return 1
+        root_id=$(basename "$root_file" .md)
+    fi
+
+    awk -v target="$root_id" '
+    BEGIN { FS=": "; in_front=0 }
+    FNR==1 {
+        if (prev_file) store()
+        id=""; status=""; title=""; parent=""; in_front=0
+        prev_file=FILENAME
+    }
+    /^---$/ { in_front = !in_front; next }
+    in_front && /^id:/ { id = $2 }
+    in_front && /^status:/ { status = $2 }
+    in_front && /^parent:/ { parent = $2 }
+    !in_front && /^# / && title == "" { title = substr($0, 3) }
+    function store() {
+        if (id != "") {
+            statuses[id] = status
+            titles[id] = title
+            parents[id] = parent
+            child_count[parent]++
+            children[parent, child_count[parent]] = id
+        }
+    }
+    function sort_values(arr, n,    i, j, tmp) {
+        for (i = 2; i <= n; i++) {
+            tmp = arr[i]
+            j = i - 1
+            while (j >= 1 && arr[j] > tmp) {
+                arr[j + 1] = arr[j]
+                j--
+            }
+            arr[j + 1] = tmp
+        }
+    }
+    function print_node(id, prefix, connector, is_last, path,    i, n, child, arr, child_prefix) {
+        if (!(id in statuses)) return
+        if (index(path, ":" id ":") > 0) {
+            printf "%s%s%-8s [%s] - %s (cycle)\n", prefix, connector, id, statuses[id], titles[id]
+            return
+        }
+
+        printf "%s%s%-8s [%s] - %s\n", prefix, connector, id, statuses[id], titles[id]
+        printed[id] = 1
+
+        n = 0
+        for (i = 1; i <= child_count[id]; i++) {
+            child = children[id, i]
+            if (child != "") arr[++n] = child
+        }
+        if (n == 0) return
+
+        sort_values(arr, n)
+        child_prefix = prefix
+        if (connector != "") child_prefix = prefix (is_last ? "    " : "│   ")
+        path = path id ":"
+
+        for (i = 1; i <= n; i++) {
+            print_node(arr[i], child_prefix, (i == n ? "└── " : "├── "), i == n, path)
+        }
+    }
+    END {
+        if (prev_file) store()
+
+        if (target != "") {
+            root = target
+            while ((root in parents) && parents[root] != "" && (parents[root] in statuses) && !(parents[root] in seen_up)) {
+                seen_up[root] = 1
+                root = parents[root]
+            }
+            print_node(root, "", "", 1, ":")
+            exit
+        }
+
+        root_count = 0
+        for (id in statuses) {
+            if (parents[id] == "" || !(parents[id] in statuses)) {
+                roots[++root_count] = id
+            }
+        }
+        sort_values(roots, root_count)
+
+        for (i = 1; i <= root_count; i++) {
+            if (!(roots[i] in printed)) print_node(roots[i], "", "", 1, ":")
+        }
+
+        extra_count = 0
+        for (id in statuses) {
+            if (!(id in printed)) extras[++extra_count] = id
+        }
+        sort_values(extras, extra_count)
+        for (i = 1; i <= extra_count; i++) {
+            if (!(extras[i] in printed)) print_node(extras[i], "", "", 1, ":")
+        }
+    }
+    ' "$TICKETS_DIR"/*.md 2>/dev/null
+}
+
 cmd_ready() {
     local tag_filter=""
     while [[ $# -gt 0 ]]; do
@@ -1365,6 +1474,7 @@ Commands:
   link <id> <id> [id...]   Link tickets together (symmetric)
   unlink <id> <target-id>  Remove link between tickets
   ls|list [--status=X] [-T X]   List tickets
+  tree [id]                Show tickets in parent/child hierarchy
   ready [-T X]             List open/in-progress tickets with deps resolved
   blocked [-T X]           List open/in-progress tickets with unresolved deps
   closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
@@ -1397,6 +1507,7 @@ case "${1:-help}" in
     link)   shift; cmd_link "$@" ;;
     unlink) shift; cmd_unlink "$@" ;;
     ls|list) shift; cmd_ls "$@" ;;
+    tree)   shift; cmd_tree "$@" ;;
     ready)  shift; cmd_ready "$@" ;;
     blocked) shift; cmd_blocked "$@" ;;
     closed) shift; cmd_closed "$@" ;;

@@ -4,6 +4,7 @@
 
 ### Added
 - `prune` command to delete all closed tickets
+- `tree` command to show tickets in parent/child hierarchy, optionally focused on one ticket
 
 ### Changed
 - Repositioned this repository as a customized, simplified fork focused on the single `ticket` bash script

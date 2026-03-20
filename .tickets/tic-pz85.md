@@ -1,6 +1,6 @@
 ---
 id: tic-pz85
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-20T16:50:01Z
