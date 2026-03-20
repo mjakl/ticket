@@ -155,6 +155,25 @@ test_closed_works_in_paths_with_spaces() {
     rm -rf "$base"
 }
 
+test_create_reports_missing_option_values() {
+    local dir
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Missing description" -d
+    assert_status 1
+    assert_contains "Error: -d requires a value"
+
+    run_in_dir "$dir" "$TK" create "Missing priority" -p
+    assert_status 1
+    assert_contains "Error: -p requires a value"
+
+    run_in_dir "$dir" "$TK" create "Missing parent" --parent
+    assert_status 1
+    assert_contains "Error: --parent requires a value"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -166,6 +185,7 @@ main() {
     run_test test_frontmatter_parser_ignores_body_hr
     run_test test_titles_with_pipe_render_in_ready_and_blocked
     run_test test_closed_works_in_paths_with_spaces
+    run_test test_create_reports_missing_option_values
     echo
     echo "Passed: $PASS_COUNT"
 }

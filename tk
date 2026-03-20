@@ -275,6 +275,23 @@ format_references() {
     printf '%s' "$out"
 }
 
+require_option_value() {
+    local option="$1"
+    local value="${2:-}"
+
+    if [[ -z "$value" ]]; then
+        echo "Error: $option requires a value" >&2
+        return 1
+    fi
+
+    case "$value" in
+        -d|--description|-p|--priority|--parent)
+            echo "Error: $option requires a value" >&2
+            return 1
+            ;;
+    esac
+}
+
 cmd_create() {
     ensure_dir
 
@@ -284,9 +301,21 @@ cmd_create() {
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -d|--description) description="$2"; shift 2 ;;
-            -p|--priority) priority="$2"; shift 2 ;;
-            --parent) parent="$2"; shift 2 ;;
+            -d|--description)
+                require_option_value "$1" "${2:-}" || return 1
+                description="$2"
+                shift 2
+                ;;
+            -p|--priority)
+                require_option_value "$1" "${2:-}" || return 1
+                priority="$2"
+                shift 2
+                ;;
+            --parent)
+                require_option_value "$1" "${2:-}" || return 1
+                parent="$2"
+                shift 2
+                ;;
             -*) echo "Unknown option: $1" >&2; return 1 ;;
             *) title="$1"; shift ;;
         esac
