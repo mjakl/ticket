@@ -292,6 +292,14 @@ require_option_value() {
     esac
 }
 
+validate_priority() {
+    local priority="$1"
+    [[ "$priority" =~ ^[0-4]$ ]] && return 0
+
+    echo "Error: invalid priority '$priority'. Must be an integer from 0 to 4" >&2
+    return 1
+}
+
 cmd_create() {
     ensure_dir
 
@@ -320,6 +328,8 @@ cmd_create() {
             *) title="$1"; shift ;;
         esac
     done
+
+    validate_priority "$priority" || return 1
 
     # Validate and resolve parent if specified
     if [[ -n "$parent" ]]; then

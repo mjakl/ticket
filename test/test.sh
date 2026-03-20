@@ -174,6 +174,27 @@ test_create_reports_missing_option_values() {
     rm -rf "$dir"
 }
 
+test_create_validates_priority_range() {
+    local dir
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Priority zero" -p 0
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" create "Priority four" -p 4
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" create "Priority five" -p 5
+    assert_status 1
+    assert_contains "Error: invalid priority '5'. Must be an integer from 0 to 4"
+
+    run_in_dir "$dir" "$TK" create "Priority z" -p z
+    assert_status 1
+    assert_contains "Error: invalid priority 'z'. Must be an integer from 0 to 4"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -186,6 +207,7 @@ main() {
     run_test test_titles_with_pipe_render_in_ready_and_blocked
     run_test test_closed_works_in_paths_with_spaces
     run_test test_create_reports_missing_option_values
+    run_test test_create_validates_priority_range
     echo
     echo "Passed: $PASS_COUNT"
 }
