@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `prune` command to delete all closed tickets
+
 ### Changed
 - Repositioned this repository as a customized, simplified fork focused on the single `ticket` bash script
 - Moved `ls`/`list` back into the core script

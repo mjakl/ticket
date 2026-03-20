@@ -885,6 +885,40 @@ cmd_closed() {
     ' | head -n "$limit"
 }
 
+cmd_prune() {
+    if [[ $# -gt 0 ]]; then
+        echo "Usage: $(basename "$0") prune" >&2
+        return 1
+    fi
+
+    local -a files
+    local file status id count=0
+
+    shopt -s nullglob
+    files=("$TICKETS_DIR"/*.md)
+    shopt -u nullglob
+
+    [[ ${#files[@]} -eq 0 ]] && {
+        echo "No closed tickets to prune"
+        return 0
+    }
+
+    for file in "${files[@]}"; do
+        status=$(yaml_field "$file" "status")
+        [[ "$status" == "closed" || "$status" == "done" ]] || continue
+        id=$(basename "$file" .md)
+        rm -f "$file"
+        echo "Pruned $id"
+        ((count += 1))
+    done
+
+    if [[ $count -eq 0 ]]; then
+        echo "No closed tickets to prune"
+    else
+        echo "Pruned $count ticket(s)"
+    fi
+}
+
 cmd_blocked() {
     local tag_filter=""
     while [[ $# -gt 0 ]]; do
@@ -1334,6 +1368,7 @@ Commands:
   ready [-T X]             List open/in-progress tickets with deps resolved
   blocked [-T X]           List open/in-progress tickets with unresolved deps
   closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
+  prune                    Delete all closed tickets
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
@@ -1365,6 +1400,7 @@ case "${1:-help}" in
     ready)  shift; cmd_ready "$@" ;;
     blocked) shift; cmd_blocked "$@" ;;
     closed) shift; cmd_closed "$@" ;;
+    prune)  shift; cmd_prune "$@" ;;
     show)   shift; cmd_show "$@" ;;
     add-note) shift; cmd_add_note "$@" ;;
     help|--help|-h) cmd_help ;;

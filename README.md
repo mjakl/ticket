@@ -34,6 +34,7 @@ Commands:
   ready [-T X]             List open/in-progress tickets with deps resolved
   blocked [-T X]           List open/in-progress tickets with unresolved deps
   closed [--limit=N] [-T X] List recently closed tickets (default 20, by mtime)
+  prune                    Delete all closed tickets
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
