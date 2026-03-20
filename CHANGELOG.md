@@ -18,6 +18,7 @@
 - Beads migration support and related README content
 - JSON query support from the documented command surface
 - Link tracking (`link`/`unlink`, `links` metadata, and linked-ticket output)
+- Dependency cycle detection (`dep cycle`)
 - Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed

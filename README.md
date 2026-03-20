@@ -26,7 +26,6 @@ Commands:
   status <id> <status>     Update status (open|in_progress|closed)
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
-  dep cycle                Find dependency cycles in open tickets
   undep <id> <dep-id>      Remove dependency
   ls|list [--status=X] [-T X]   List tickets
   tree [id]                Show tickets in parent/child hierarchy

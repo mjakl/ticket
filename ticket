@@ -495,123 +495,6 @@ cmd_dep_tree() {
     ' "${TICKET_FILES[@]}" 2>/dev/null
 }
 
-cmd_dep_cycle() {
-    load_ticket_files
-    if [[ ${#TICKET_FILES[@]} -eq 0 ]]; then
-        echo "No dependency cycles found"
-        return 0
-    fi
-
-    awk '
-    BEGIN { FS=": "; in_front=0 }
-    FNR==1 {
-        if (prev_file) store()
-        id=""; status=""; title=""; deps=""; in_front=0
-        prev_file=FILENAME
-    }
-    /^---$/ { in_front = !in_front; next }
-    in_front && /^id:/ { id = $2 }
-    in_front && /^status:/ { status = $2 }
-    in_front && /^deps:/ {
-        deps = $2
-        gsub(/[\[\] ]/, "", deps)
-    }
-    !in_front && /^# / && title == "" { title = substr($0, 3) }
-    function store() {
-        if (id != "" && status != "closed") {
-            statuses[id] = status
-            titles[id] = title
-            deps_str[id] = deps
-            n = split(deps, arr, ",")
-            for (i = 1; i <= n; i++) if (arr[i] != "") {
-                dep_count[id]++
-                dep_list[id, dep_count[id]] = arr[i]
-            }
-        }
-    }
-
-    # DFS cycle detection
-    function dfs(node, path, path_len,    i, child, result) {
-        if (!(node in statuses)) return ""
-        if (state[node] == 2) return ""  # black - fully visited
-        if (state[node] == 1) {
-            # gray - found cycle, extract it
-            cycle = node
-            for (i = path_len; i >= 1; i--) {
-                cycle = path[i] " -> " cycle
-                if (path[i] == node) break
-            }
-            return cycle
-        }
-
-        state[node] = 1  # gray - visiting
-        path[path_len + 1] = node
-
-        for (i = 1; i <= dep_count[node]; i++) {
-            child = dep_list[node, i]
-            result = dfs(child, path, path_len + 1)
-            if (result != "") return result
-        }
-
-        state[node] = 2  # black - done
-        return ""
-    }
-
-    END {
-        if (prev_file) store()
-
-        cycle_count = 0
-        for (id in statuses) {
-            if (state[id] == 0) {
-                delete path
-                result = dfs(id, path, 0)
-                if (result != "") {
-                    # Check if this cycle is already found (normalized)
-                    # Extract cycle members
-                    n = split(result, parts, " -> ")
-                    # Normalize: find smallest ID as starting point
-                    min_id = parts[1]
-                    min_idx = 1
-                    for (i = 2; i < n; i++) {  # skip last (duplicate of first)
-                        if (parts[i] < min_id) {
-                            min_id = parts[i]
-                            min_idx = i
-                        }
-                    }
-                    # Build normalized cycle string
-                    norm = ""
-                    for (i = 0; i < n - 1; i++) {
-                        idx = ((min_idx - 1 + i) % (n - 1)) + 1
-                        norm = (norm == "") ? parts[idx] : norm "," parts[idx]
-                    }
-                    # Check if already seen
-                    if (!(norm in seen_cycles)) {
-                        seen_cycles[norm] = 1
-                        cycle_count++
-                        cycles[cycle_count] = result
-                        cycle_members[cycle_count] = norm
-                    }
-                }
-            }
-        }
-
-        if (cycle_count == 0) {
-            print "No dependency cycles found"
-        } else {
-            for (c = 1; c <= cycle_count; c++) {
-                if (c > 1) print ""
-                print "Cycle " c ": " cycles[c]
-                n = split(cycle_members[c], members, ",")
-                for (i = 1; i <= n; i++) {
-                    id = members[i]
-                    printf "  %-8s [%s] %s\n", id, statuses[id], titles[id]
-                }
-            }
-        }
-    }
-    ' "${TICKET_FILES[@]}" 2>/dev/null
-}
-
 cmd_dep() {
     # Handle subcommands
     if [[ "${1:-}" == "tree" ]]; then
@@ -619,16 +502,10 @@ cmd_dep() {
         cmd_dep_tree "$@"
         return
     fi
-    if [[ "${1:-}" == "cycle" ]]; then
-        shift
-        cmd_dep_cycle "$@"
-        return
-    fi
 
     if [[ $# -lt 2 ]]; then
         echo "Usage: ticket dep <id> <dependency-id>" >&2
         echo "       ticket dep tree [id]  - show dependency tree" >&2
-        echo "       ticket dep cycle      - find dependency cycles" >&2
         return 1
     fi
 
@@ -1309,7 +1186,6 @@ Commands:
   status <id> <status>     Update status (open|in_progress|closed)
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
-  dep cycle                Find dependency cycles in open tickets
   undep <id> <dep-id>      Remove dependency
   ls|list [--status=X] [-T X]   List tickets
   tree [id]                Show tickets in parent/child hierarchy
