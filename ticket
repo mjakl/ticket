@@ -239,15 +239,13 @@ array_remove() {
 cmd_create() {
     ensure_dir
 
-    local title="" description="" design="" acceptance=""
+    local title="" description=""
     local priority=2 parent=""
 
     # Parse args
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -d|--description) description="$2"; shift 2 ;;
-            --design) design="$2"; shift 2 ;;
-            --acceptance) acceptance="$2"; shift 2 ;;
             -p|--priority) priority="$2"; shift 2 ;;
             --parent) parent="$2"; shift 2 ;;
             -*) echo "Unknown option: $1" >&2; return 1 ;;
@@ -282,18 +280,6 @@ cmd_create() {
         echo ""
         if [[ -n "$description" ]]; then
             echo "$description"
-            echo ""
-        fi
-        if [[ -n "$design" ]]; then
-            echo "## Design"
-            echo ""
-            echo "$design"
-            echo ""
-        fi
-        if [[ -n "$acceptance" ]]; then
-            echo "## Acceptance Criteria"
-            echo ""
-            echo "$acceptance"
             echo ""
         fi
     } > "$file"
@@ -1112,8 +1098,6 @@ Usage: $cmd <command> [args]
 Commands:
   create [title] [options] Create ticket, prints ID
     -d, --description      Description text
-    --design               Design notes
-    --acceptance           Acceptance criteria
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
   start <id>               Set status to in_progress

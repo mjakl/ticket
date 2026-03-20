@@ -21,6 +21,7 @@
 - Dependency cycle detection (`dep cycle`)
 - Ticket type metadata and the `--type` creation flag
 - Tags, tag filters, and tag metadata
+- `--design` and `--acceptance` creation flags
 - Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed

@@ -14,8 +14,6 @@ Usage: tk <command> [args]
 Commands:
   create [title] [options] Create ticket, prints ID
     -d, --description      Description text
-    --design               Design notes
-    --acceptance           Acceptance criteria
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
   start <id>               Set status to in_progress
