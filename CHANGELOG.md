@@ -12,6 +12,7 @@
 - Plugin dispatch and the `super` command
 - Beads migration support and related README content
 - JSON query support from the documented command surface
+- Packaging, CI, plugin, and test repository artifacts from this fork
 
 ### Fixed
 - YAML field updates now modify frontmatter only
