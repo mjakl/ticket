@@ -195,6 +195,54 @@ test_create_validates_priority_range() {
     rm -rf "$dir"
 }
 
+test_create_retries_on_id_collision() {
+    local dir fake_bin state_file
+    dir=$(new_workspace)
+    fake_bin="$dir/fake-bin"
+    state_file="$dir/tr-state"
+    mkdir -p "$dir/.tickets" "$fake_bin"
+
+    cat > "$dir/.tickets/abc123.md" <<'EOF'
+---
+id: abc123
+status: open
+deps: []
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Existing
+EOF
+
+    cat > "$fake_bin/tr" <<EOF
+#!/usr/bin/env bash
+state_file="$state_file"
+if [[ ! -f "\$state_file" ]]; then
+    echo 1 > "\$state_file"
+    printf 'abc123'
+else
+    printf 'def456'
+fi
+EOF
+    chmod +x "$fake_bin/tr"
+
+    run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" create "Collision retry"
+    assert_status 0
+    assert_equals "def456"
+
+    [[ -f "$dir/.tickets/abc123.md" ]] || fail "expected original ticket to remain"
+    [[ -f "$dir/.tickets/def456.md" ]] || fail "expected retried ticket to be created"
+
+    run_in_dir "$dir" "$TK" show abc123
+    assert_status 0
+    assert_contains "# Existing"
+
+    run_in_dir "$dir" "$TK" show def456
+    assert_status 0
+    assert_contains "# Collision retry"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -208,6 +256,7 @@ main() {
     run_test test_closed_works_in_paths_with_spaces
     run_test test_create_reports_missing_option_values
     run_test test_create_validates_priority_range
+    run_test test_create_retries_on_id_collision
     echo
     echo "Passed: $PASS_COUNT"
 }

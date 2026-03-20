@@ -339,9 +339,20 @@ cmd_create() {
     fi
 
     title="${title:-Untitled}"
-    local id
-    id=$(generate_id)
-    local file="$TICKETS_DIR/${id}.md"
+    local id file
+    local attempts=0
+    while true; do
+        id=$(generate_id)
+        file="$TICKETS_DIR/${id}.md"
+        [[ ! -e "$file" ]] && break
+
+        attempts=$((attempts + 1))
+        if [[ $attempts -ge 100 ]]; then
+            echo "Error: failed to generate a unique ticket ID after 100 attempts" >&2
+            return 1
+        fi
+    done
+
     local now
     now=$(_iso_date)
 
