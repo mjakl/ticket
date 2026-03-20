@@ -2,11 +2,14 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-20
+
 ### Added
 - `prune` command to delete closed tickets
 - `delete <id>` command to remove one unreferenced ticket
 - `tree` command to show tickets in parent/child hierarchy, optionally focused on one ticket
 - `dep tree` now works without an ID and shows a global dependency hierarchy; repeated dependencies are marked as shared unless `--full` is used
+- End-to-end regression test suite for core CLI flows and known edge cases
 
 ### Changed
 - Repositioned this repository as a customized, simplified fork focused on the single `ticket` bash script
@@ -34,6 +37,13 @@
 - `dep` now rejects self-dependencies
 - `prune` now skips closed tickets that are still referenced by another ticket
 - `prune` now removes entire closed-only dependency/parent chains in one pass instead of leaving newly unreferenced leftovers behind
+- Frontmatter scanners now ignore `---` lines in ticket bodies instead of misparsing them as YAML
+- `ready` and `blocked` now render titles containing `|` correctly
+- `closed` now works when repository or ticket paths contain spaces
+- `create` now reports missing option values with helpful errors instead of crashing
+- `create` now validates priorities against the documented `0..4` range
+- `create` now retries on generated ID collisions instead of overwriting an existing ticket
+- Parser and runtime failures now surface instead of being broadly hidden by `2>/dev/null`
 
 ## [0.3.2] - 2026-02-03
 
