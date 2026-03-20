@@ -3,22 +3,19 @@
 ## [Unreleased]
 
 ### Changed
-- Extracted `edit`, `ls`, `query`, and `migrate-beads` commands to plugins (ticket-extras)
+- Repositioned this repository as a customized, simplified fork focused on the single `ticket` bash script
+- Moved `ls`/`list` back into the core script
+- Simplified ticket creation and listing by removing assignee and external reference handling
+- Rewrote the README to match the reduced command surface and repository scope
 
-### Added
-- Plugin system: executables named `tk-<cmd>` or `ticket-<cmd>` in PATH are invoked automatically
-- `super` command to bypass plugins and run built-in commands directly
-- `TICKETS_DIR` and `TK_SCRIPT` environment variables exported for plugins
-- `help` command lists installed plugins with descriptions
-- Plugin metadata: `# tk-plugin:` comment for scripts, `--tk-describe` flag for binaries
-- Multi-package distribution: `ticket-core`, `ticket-extras`, and individual plugin packages
-- CI scripts for publishing to Homebrew tap and AUR
+### Removed
+- Plugin dispatch and the `super` command
+- Beads migration support and related README content
+- JSON query support from the documented command surface
 
-### Plugins
-- ticket-edit 1.0.0: Open ticket in $EDITOR (extracted from core)
-- ticket-ls 1.0.0: List tickets with optional filters (extracted from core); `ticket-list` symlink for alias
-- ticket-query 1.0.0: Output tickets as JSON, optionally filtered with jq (extracted from core)
-- ticket-migrate-beads 1.0.0: Import tickets from .beads/issues.jsonl (extracted from core)
+### Fixed
+- YAML field updates now modify frontmatter only
+- Dependency and link removal now match exact ticket IDs instead of substrings
 
 ## [0.3.2] - 2026-02-03
 

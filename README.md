@@ -1,51 +1,8 @@
 # ticket
 
-The git-backed issue tracker for AI agents. Rooted in the Unix Philosophy, `tk` is inspired by Joe Armstrong's [Minimal Viable Program](https://joearms.github.io/published/2014-06-25-minimal-viable-program.html) with a few quality-of-life features for managing ticket relationships.
+This is a customized, simplified fork of the original `ticket` project. It is tailored to my own workflow and probably has little or no value for other people.
 
-Tickets are markdown files with YAML frontmatter in `.tickets/`. This allows AI agents to easily search them for relevant content without dumping ten thousand character JSONL lines into their context window.
-
-Using ticket IDs as file names also allows IDEs to quickly navigate to the ticket for you. For example, you might run `git log` in your terminal and see something like:
-
-```
-nw-5c46: add SSE connection management 
-```
-
-VS Code allows you to Ctrl+Click or Cmd+Click the ID and jump directly to the file to read the details.
-
-## Install
-
-**Homebrew (macOS/Linux):**
-```bash
-brew tap wedow/tools
-brew install ticket
-```
-
-**Arch Linux (AUR):**
-```bash
-yay -S ticket  # or paru, etc.
-```
-
-**From source (auto-updates on git pull):**
-```bash
-git clone https://github.com/wedow/ticket.git
-cd ticket && ln -s "$PWD/ticket" ~/.local/bin/tk
-```
-
-**Or** just copy `ticket` to somewhere in your PATH.
-
-## Requirements
-
-`tk` is a portable bash script requiring only coreutils, so it works out of the box on any POSIX system with bash installed. Uses `rg` (ripgrep) if available, falls back to `grep`.
-
-## Agent Setup
-
-Add this line to your `CLAUDE.md` or `AGENTS.md`:
-
-```
-This project uses a CLI ticket system for task management. Run `tk help` when you need to use it.
-```
-
-Claude Opus picks it up naturally from there. Other models may need additional guidance.
+`tk` is a small git-friendly issue tracker that stores tickets as Markdown files with YAML frontmatter in `.tickets/`.
 
 ## Usage
 
@@ -84,15 +41,11 @@ Searches parent directories for .tickets/ (override with TICKETS_DIR env var)
 Supports partial ID matching (e.g., 'tk show 5c4' matches 'nw-5c46')
 ```
 
-## Testing
+## Notes
 
-The tests are written in the Behavior-Driven Development library [behave](https://behave.readthedocs.io/en/latest/) and require Python.
-
-If you have `uv` [installed](https://docs.astral.sh/uv/getting-started/installation/) simply:
-
-```sh
-make test
-```
+- Tickets are stored as Markdown files in `.tickets/`
+- The script walks parent directories to find `.tickets/`
+- `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## License
 
