@@ -33,6 +33,7 @@
 - Commands that scan tickets now handle empty `.tickets/` directories without failing
 - `dep` now rejects self-dependencies
 - `prune` now skips closed tickets that are still referenced by another ticket
+- `prune` now removes entire closed-only dependency/parent chains in one pass instead of leaving newly unreferenced leftovers behind
 
 ## [0.3.2] - 2026-02-03
 

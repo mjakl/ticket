@@ -28,7 +28,7 @@ Commands:
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
   closed [--limit=N]       List recently closed tickets (default 20, by mtime)
-  prune                    Delete all unreferenced closed tickets
+  prune                    Delete closed tickets not reachable from non-closed tickets
   delete <id>              Delete one unreferenced ticket
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
@@ -43,7 +43,8 @@ Supports partial ID matching (e.g., 'tk show 1a2' matches '1a2b3c')
 - Set `TICKETS_DIR` to use a different ticket directory
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
 - `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
-- `prune` and `delete` refuse to remove tickets that are still referenced via `deps` or `parent`
+- `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
+- `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## License

@@ -815,45 +815,89 @@ cmd_closed() {
     ' | head -n "$limit"
 }
 
+ticket_outgoing_refs() {
+    local file="$1"
+    local parent deps dep_id
+
+    parent=$(yaml_field "$file" "parent")
+    [[ -n "$parent" ]] && printf '%s\n' "$parent"
+
+    deps=$(yaml_field "$file" "deps")
+    deps="${deps#[}"
+    deps="${deps%]}"
+    deps="${deps// /}"
+    [[ -z "$deps" ]] && return 0
+
+    local -a dep_ids
+    IFS=',' read -r -a dep_ids <<< "$deps"
+    for dep_id in "${dep_ids[@]}"; do
+        [[ -n "$dep_id" ]] && printf '%s\n' "$dep_id"
+    done
+}
+
 cmd_prune() {
     if [[ $# -gt 0 ]]; then
         echo "Usage: $(basename "$0") prune" >&2
         return 1
     fi
 
-    local -a files
-    local file status id refs count=0 skipped=0
-
-    shopt -s nullglob
-    files=("$TICKETS_DIR"/*.md)
-    shopt -u nullglob
-
-    [[ ${#files[@]} -eq 0 ]] && {
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && {
         echo "No closed tickets to prune"
         return 0
     }
 
-    for file in "${files[@]}"; do
-        status=$(yaml_field "$file" "status")
-        [[ "$status" == "closed" ]] || continue
+    local -A file_by_id=() reachable=()
+    local -a closed_ids=() queue=()
+    local file id status current ref_id
+    local head=0 count=0 retained=0
+
+    for file in "${TICKET_FILES[@]}"; do
         id=$(basename "$file" .md)
-        refs=$(ticket_references "$id")
-        if [[ -n "$refs" ]]; then
-            echo "Skipped $id ($(format_references "$refs"))"
-            ((skipped += 1))
+        status=$(yaml_field "$file" "status")
+        file_by_id["$id"]="$file"
+        if [[ "$status" == "closed" ]]; then
+            closed_ids+=("$id")
+        else
+            queue+=("$id")
+        fi
+    done
+
+    [[ ${#closed_ids[@]} -eq 0 ]] && {
+        echo "No closed tickets to prune"
+        return 0
+    }
+
+    while [[ $head -lt ${#queue[@]} ]]; do
+        current="${queue[$head]}"
+        ((head += 1))
+
+        [[ -n "${reachable[$current]:-}" ]] && continue
+        reachable["$current"]=1
+
+        file="${file_by_id[$current]:-}"
+        [[ -z "$file" ]] && continue
+
+        while IFS= read -r ref_id; do
+            [[ -z "$ref_id" || -z "${file_by_id[$ref_id]:-}" || -n "${reachable[$ref_id]:-}" ]] && continue
+            queue+=("$ref_id")
+        done < <(ticket_outgoing_refs "$file")
+    done
+
+    for id in "${closed_ids[@]}"; do
+        if [[ -n "${reachable[$id]:-}" ]]; then
+            echo "Retained $id (still reachable from non-closed tickets)"
+            ((retained += 1))
             continue
         fi
-        rm -f "$file"
+
+        rm -f "${file_by_id[$id]}"
         echo "Pruned $id"
         ((count += 1))
     done
 
-    if [[ $count -eq 0 && $skipped -eq 0 ]]; then
-        echo "No closed tickets to prune"
-    else
-        [[ $count -gt 0 ]] && echo "Pruned $count ticket(s)"
-        [[ $skipped -gt 0 ]] && echo "Skipped $skipped referenced ticket(s)"
-    fi
+    [[ $count -gt 0 ]] && echo "Pruned $count ticket(s)"
+    [[ $retained -gt 0 ]] && echo "Retained $retained closed ticket(s) still reachable from non-closed tickets"
 }
 
 cmd_delete() {
@@ -1177,7 +1221,7 @@ Commands:
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
   closed [--limit=N]       List recently closed tickets (default 20, by mtime)
-  prune                    Delete all unreferenced closed tickets
+  prune                    Delete closed tickets not reachable from non-closed tickets
   delete <id>              Delete one unreferenced ticket
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
