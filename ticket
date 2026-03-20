@@ -135,23 +135,99 @@ ticket_path() {
 yaml_field() {
     local file="$1"
     local field="$2"
-    sed -n '/^---$/,/^---$/p' "$file" | _grep "^${field}:" | sed "s/^${field}: *//"
+    awk -v field="$field" '
+        NR == 1 && /^---$/ { in_front = 1; next }
+        in_front && /^---$/ { exit }
+        in_front && index($0, field ":") == 1 {
+            sub("^[^:]+: *", "", $0)
+            print
+            exit
+        }
+    ' "$file"
 }
 
-# Update YAML field
+# Update YAML field in frontmatter only
 update_yaml_field() {
     local file="$1"
     local field="$2"
     local value="$3"
+    local tmp="${file}.tmp.$$"
 
-    if _grep -q "^${field}:" "$file"; then
-        _sed_i "$file" "s/^${field}:.*/${field}: ${value}/"
+    awk -v field="$field" -v value="$value" '
+        NR == 1 && /^---$/ {
+            in_front = 1
+            print
+            next
+        }
+        in_front && /^---$/ {
+            if (!updated) print field ": " value
+            in_front = 0
+            print
+            next
+        }
+        in_front && index($0, field ":") == 1 {
+            if (!updated) print field ": " value
+            updated = 1
+            next
+        }
+        { print }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+array_contains() {
+    local list="$1"
+    local item="$2"
+    local value
+
+    list="${list#[}"
+    list="${list%]}"
+    list="${list// /}"
+    [[ -z "$list" ]] && return 1
+
+    local -a values
+    IFS=',' read -r -a values <<< "$list"
+    for value in "${values[@]}"; do
+        [[ "$value" == "$item" ]] && return 0
+    done
+    return 1
+}
+
+array_append() {
+    local list="$1"
+    local item="$2"
+
+    if [[ "$list" == "[]" || -z "${list// }" ]]; then
+        echo "[$item]"
     else
-        # Insert after first --- (beginning of frontmatter)
-        _sed_i "$file" "0,/^---$/ { /^---$/a\\
-${field}: ${value}
-}"
+        echo "${list%]}, $item]"
     fi
+}
+
+array_remove() {
+    local list="$1"
+    local item="$2"
+    local value out=""
+
+    list="${list#[}"
+    list="${list%]}"
+    list="${list// /}"
+    [[ -z "$list" ]] && {
+        echo "[]"
+        return 0
+    }
+
+    local -a values
+    IFS=',' read -r -a values <<< "$list"
+    for value in "${values[@]}"; do
+        [[ -z "$value" || "$value" == "$item" ]] && continue
+        if [[ -z "$out" ]]; then
+            out="$value"
+        else
+            out="$out, $value"
+        fi
+    done
+
+    [[ -z "$out" ]] && echo "[]" || echo "[$out]"
 }
 
 cmd_create() {
@@ -626,19 +702,12 @@ cmd_dep() {
     current_deps=$(yaml_field "$file" "deps")
 
     # Add dep if not already present
-    if echo "$current_deps" | _grep -q "$dep_id"; then
+    if array_contains "$current_deps" "$dep_id"; then
         echo "Dependency already exists"
         return 0
     fi
 
-    # Update deps array
-    if [[ "$current_deps" == "[]" ]]; then
-        update_yaml_field "$file" "deps" "[$dep_id]"
-    else
-        local new_deps
-        new_deps=$(echo "$current_deps" | sed "s/\]/, $dep_id]/")
-        update_yaml_field "$file" "deps" "$new_deps"
-    fi
+    update_yaml_field "$file" "deps" "$(array_append "$current_deps" "$dep_id")"
 
     echo "Added dependency: $(basename "$file" .md) -> $dep_id"
 }
@@ -929,18 +998,12 @@ cmd_undep() {
     local current_deps
     current_deps=$(yaml_field "$file" "deps")
 
-    if ! echo "$current_deps" | _grep -q "$dep_id"; then
+    if ! array_contains "$current_deps" "$dep_id"; then
         echo "Dependency not found"
         return 1
     fi
 
-    # Remove dep from array
-    local new_deps
-    new_deps=$(echo "$current_deps" | sed "s/, *$dep_id//g; s/$dep_id, *//g; s/$dep_id//g")
-    # Clean up empty array case
-    [[ "$new_deps" == "[]" || "$new_deps" == "[, ]" || "$new_deps" == "[ ]" ]] && new_deps="[]"
-
-    update_yaml_field "$file" "deps" "$new_deps"
+    update_yaml_field "$file" "deps" "$(array_remove "$current_deps" "$dep_id")"
     echo "Removed dependency: $(basename "$file" .md) -/-> $dep_id"
 }
 
@@ -960,9 +1023,6 @@ cmd_link() {
     done
 
     # Use awk to update all files in one pass per file
-    local id_list
-    id_list=$(printf '%s\n' "${ids[@]}")
-
     local count=0
     for ((i=0; i<${#ids[@]}; i++)); do
         local file="${files[$i]}"
@@ -1040,7 +1100,7 @@ cmd_unlink() {
     local current_links
     current_links=$(yaml_field "$file" "links" || true)
 
-    if [[ -z "$current_links" ]] || ! echo "$current_links" | _grep -q "$target_id"; then
+    if [[ -z "$current_links" ]] || ! array_contains "$current_links" "$target_id"; then
         echo "Link not found"
         return 1
     fi
@@ -1050,11 +1110,8 @@ cmd_unlink() {
         local f="${pair%%:*}" tid="${pair#*:}"
         local links
         links=$(yaml_field "$f" "links" || true)
-        [[ -z "$links" ]] || ! echo "$links" | _grep -q "$tid" && continue
-        local new_links
-        new_links=$(echo "$links" | sed "s/, *$tid//g; s/$tid, *//g; s/$tid//g")
-        [[ "$new_links" == "[]" || "$new_links" == "[, ]" || "$new_links" == "[ ]" ]] && new_links="[]"
-        update_yaml_field "$f" "links" "$new_links"
+        [[ -z "$links" ]] || ! array_contains "$links" "$tid" && continue
+        update_yaml_field "$f" "links" "$(array_remove "$links" "$tid")"
     done
 
     echo "Removed link: $id <-> $target_id"
