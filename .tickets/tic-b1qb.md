@@ -1,6 +1,6 @@
 ---
 id: tic-b1qb
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-20T16:44:20Z
