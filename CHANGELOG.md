@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `done` command for automation-friendly completion checks; exits `0` when all tickets are closed and `1` while any ticket remains unfinished
+
 ## [0.5.0] - 2026-03-20
 
 ### Added

@@ -832,6 +832,67 @@ cmd_ready() {
     ' "${TICKET_FILES[@]}"
 }
 
+cmd_done() {
+    if [[ $# -gt 0 ]]; then
+        echo "Usage: $(basename "$0") done" >&2
+        return 1
+    fi
+
+    load_ticket_files
+    [[ ${#TICKET_FILES[@]} -eq 0 ]] && {
+        echo "All tickets are closed"
+        return 0
+    }
+
+    local remaining
+    remaining=$(awk '
+    BEGIN { FS=": "; in_front=0; sep=sprintf("%c", 31) }
+    FNR==1 {
+        if (prev_file) store()
+        id=""; status=""; title=""; priority=""; in_front=0
+        prev_file=FILENAME
+    }
+    FNR == 1 && /^---$/ { in_front = 1; next }
+    in_front && /^---$/ { in_front = 0; next }
+    in_front && /^id:/ { id = $2 }
+    in_front && /^status:/ { status = $2 }
+    in_front && /^priority:/ { priority = $2 }
+    !in_front && /^# / && title == "" { title = substr($0, 3) }
+    function store() {
+        if (id != "" && status != "closed") {
+            output[++count] = ((priority != "") ? priority : 2) sep id sep status sep title
+        }
+    }
+    END {
+        if (prev_file) store()
+
+        for (i = 1; i <= count; i++) {
+            for (j = i + 1; j <= count; j++) {
+                split(output[i], a, sep)
+                split(output[j], b, sep)
+                if (a[1] > b[1] || (a[1] == b[1] && a[2] > b[2])) {
+                    tmp = output[i]; output[i] = output[j]; output[j] = tmp
+                }
+            }
+        }
+
+        for (i = 1; i <= count; i++) {
+            split(output[i], f, sep)
+            printf "%-8s [P%s][%s] - %s\n", f[2], f[1], f[3], f[4]
+        }
+    }
+    ' "${TICKET_FILES[@]}")
+
+    if [[ -z "$remaining" ]]; then
+        echo "All tickets are closed"
+        return 0
+    fi
+
+    echo "Unfinished tickets remain:"
+    printf '%s\n' "$remaining"
+    return 1
+}
+
 cmd_closed() {
     local limit=20
     while [[ $# -gt 0 ]]; do
@@ -1283,6 +1344,7 @@ Commands:
   tree [id]                Show tickets in parent/child hierarchy
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
+  done                     Exit 0 when all tickets are closed, 1 otherwise
   closed [--limit=N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete closed tickets not reachable from non-closed tickets
   delete <id>              Delete one unreferenced ticket
@@ -1320,6 +1382,7 @@ case "${1:-help}" in
     tree)   shift; cmd_tree "$@" ;;
     ready)  shift; cmd_ready "$@" ;;
     blocked) shift; cmd_blocked "$@" ;;
+    done)   shift; cmd_done "$@" ;;
     closed) shift; cmd_closed "$@" ;;
     prune)  shift; cmd_prune "$@" ;;
     delete) shift; cmd_delete "$@" ;;

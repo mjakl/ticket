@@ -427,6 +427,47 @@ test_prune_keeps_reachable_closed_tickets() {
     rm -rf "$dir"
 }
 
+test_done_reports_completion_via_exit_status() {
+    local dir open_id progress_id
+    dir=$(new_workspace)
+    mkdir -p "$dir/.tickets"
+
+    run_in_dir "$dir" "$TK" done
+    assert_status 0
+    assert_contains "All tickets are closed"
+
+    run_in_dir "$dir" "$TK" create "Still open"
+    assert_status 0
+    open_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" create "In progress"
+    assert_status 0
+    progress_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" start "$progress_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" done
+    assert_status 1
+    assert_contains "Unfinished tickets remain:"
+    assert_contains "$open_id"
+    assert_contains "[open] - Still open"
+    assert_contains "$progress_id"
+    assert_contains "[in_progress] - In progress"
+
+    run_in_dir "$dir" "$TK" close "$open_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" close "$progress_id"
+    assert_status 0
+
+    run_in_dir "$dir" "$TK" done
+    assert_status 0
+    assert_contains "All tickets are closed"
+
+    rm -rf "$dir"
+}
+
 run_test() {
     local name="$1"
     echo "==> $name"
@@ -447,6 +488,7 @@ main() {
     run_test test_partial_id_resolution_and_ambiguity
     run_test test_delete_refuses_referenced_tickets
     run_test test_prune_keeps_reachable_closed_tickets
+    run_test test_done_reports_completion_via_exit_status
     echo
     echo "Passed: $PASS_COUNT"
 }

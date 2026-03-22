@@ -39,6 +39,7 @@ Commands:
   tree [id]                Show tickets in parent/child hierarchy
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
+  done                     Exit 0 when all tickets are closed, 1 otherwise
   closed [--limit=N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete closed tickets not reachable from non-closed tickets
   delete <id>              Delete one unreferenced ticket
@@ -71,6 +72,7 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
 - Supports partial ID matching (e.g. `tk show 1a2` matches `1a2b3c`)
 - `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
+- `done` is useful in automation: it exits `0` when every ticket is `closed`, and `1` while any ticket remains `open` or `in_progress`
 - `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
