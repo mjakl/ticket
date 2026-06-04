@@ -25,7 +25,7 @@ Usage: tk <command> [args]
 
 Commands:
   create [title] [options] Create ticket, prints ID
-    -d, --description      Description text
+    -d, --description      Description text, or '-' to read from stdin
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
   start <id>               Set status to in_progress
@@ -53,6 +53,15 @@ Examples:
   tk create "Draft changelog" --parent abc123
   tk create "Publish GitHub release" --parent abc123
   tk dep publish-id changelog-id   # publish is blocked by changelog
+```
+
+For longer descriptions, use stdin to avoid shell quoting issues:
+
+```bash
+tk create "Investigate modal behavior" -d - <<'EOF'
+Capture context, examples, and acceptance criteria here.
+Backticks, quotes, and $VARIABLES stay literal with the quoted EOF marker.
+EOF
 ```
 
 ## Testing

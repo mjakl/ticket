@@ -5,6 +5,7 @@
 ### Added
 - `done` command for automation-friendly completion checks; exits `0` when all tickets are closed and `1` while any ticket remains unfinished
 - Subcommands now accept `--help`/`-h` without requiring an existing ticket store
+- `create -d -`/`create --description -` can read descriptions from stdin for safer multiline ticket text
 
 ## [0.5.0] - 2026-03-20
 

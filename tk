@@ -311,7 +311,11 @@ cmd_create() {
         case "$1" in
             -d|--description)
                 require_option_value "$1" "${2:-}" || return 1
-                description="$2"
+                if [[ "$2" == "-" ]]; then
+                    description=$(cat)
+                else
+                    description="$2"
+                fi
                 shift 2
                 ;;
             -p|--priority)
@@ -1330,7 +1334,7 @@ Usage: $cmd <command> [args]
 
 Commands:
   create [title] [options] Create ticket, prints ID
-    -d, --description      Description text
+    -d, --description      Description text, or '-' to read from stdin
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
   start <id>               Set status to in_progress
