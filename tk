@@ -1363,6 +1363,13 @@ EOF
 
 # Main dispatch
 
+# Show subcommand help before ticket store initialization so commands like
+# `tk create --help` work even in repositories without .tickets/ yet.
+if [[ "${2:-}" == "--help" || "${2:-}" == "-h" ]]; then
+    cmd_help "${1:-help}"
+    exit 0
+fi
+
 # Initialize tickets dir for built-in commands (skip for help)
 case "${1:-help}" in
     help|--help|-h) ;;
@@ -1388,7 +1395,8 @@ case "${1:-help}" in
     delete) shift; cmd_delete "$@" ;;
     show)   shift; cmd_show "$@" ;;
     add-note) shift; cmd_add_note "$@" ;;
-    help|--help|-h) cmd_help ;;
+    help) shift; cmd_help "$@" ;;
+    --help|-h) cmd_help ;;
     *)
         echo "Unknown command: $1" >&2
         cmd_help >&2

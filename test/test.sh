@@ -289,6 +289,21 @@ EOF
     rm -rf "$dir"
 }
 
+test_subcommand_help_does_not_need_ticket_store() {
+    local dir
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create --help
+    assert_status 0
+    assert_contains "create [title] [options]"
+
+    run_in_dir "$dir" "$TK" help create
+    assert_status 0
+    assert_contains "create [title] [options]"
+
+    rm -rf "$dir"
+}
+
 test_create_show_and_status_flow() {
     local dir id
     dir=$(new_workspace)
@@ -483,6 +498,7 @@ main() {
     run_test test_create_validates_priority_range
     run_test test_create_retries_on_id_collision
     run_test test_parser_errors_are_not_suppressed
+    run_test test_subcommand_help_does_not_need_ticket_store
     run_test test_create_show_and_status_flow
     run_test test_dep_and_undep_flow
     run_test test_partial_id_resolution_and_ambiguity
