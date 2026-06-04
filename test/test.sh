@@ -483,6 +483,10 @@ test_dep_and_undep_flow() {
     assert_status 0
     assert_contains "deps: []"
 
+    run_in_dir "$dir" "$TK" undep "$task_id" "$blocker_id"
+    assert_status 0
+    assert_contains "Dependency not found"
+
     rm -rf "$dir"
 }
 

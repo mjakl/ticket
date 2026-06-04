@@ -12,6 +12,7 @@
 
 ### Fixed
 - `list` and `closed` now reject unknown options instead of silently ignoring them
+- `undep` is now idempotent when the dependency is already absent
 
 ## [0.5.0] - 2026-03-20
 

@@ -88,6 +88,7 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 - `done` is useful in automation: it exits `0` when every ticket is `closed`, and `1` while any ticket remains `open` or `in_progress`
 - `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
+- `undep` is idempotent when the dependency is already absent
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## Upstream
