@@ -82,6 +82,7 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 - `tk init` creates `.tickets/` and adds `.tickets/` to `.gitignore`; use `tk init --tracked` if you want tickets committed
 - Set `TICKETS_DIR` to use a different ticket directory
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
+- Queue-summary commands such as `list`, `ready`, `blocked`, `tree`, `closed`, and `done` behave like an empty queue when no ticket store exists
 - Supports partial ID matching (e.g. `tk show 1a2` matches `1a2b3c`)
 - `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
 - `done` is useful in automation: it exits `0` when every ticket is `closed`, and `1` while any ticket remains `open` or `in_progress`

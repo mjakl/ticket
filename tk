@@ -29,11 +29,17 @@ find_tickets_dir() {
 # Commands that can create .tickets if not found
 WRITE_COMMANDS="create init"
 
+# Queue-summary commands should be safe probes in repositories that do not
+# have a ticket store yet.
+MISSING_STORE_OK_COMMANDS="ls list tree ready blocked closed done"
+
 # Initialize TICKETS_DIR based on command type
 init_tickets_dir() {
-    local cmd="$1"
-    local is_write_cmd=0
+    local cmd="${1:-}"
+    local is_write_cmd=0 allow_missing_store=0
     [[ " $WRITE_COMMANDS " == *" $cmd "* ]] && is_write_cmd=1
+    [[ " $MISSING_STORE_OK_COMMANDS " == *" $cmd "* ]] && allow_missing_store=1
+    [[ "$cmd" == "dep" && "${2:-}" == "tree" ]] && allow_missing_store=1
 
     if TICKETS_DIR=$(find_tickets_dir); then
         # For read commands, verify the directory exists
@@ -46,6 +52,12 @@ init_tickets_dir() {
 
     # Not found - write commands can initialize in current directory
     if [[ $is_write_cmd -eq 1 ]]; then
+        TICKETS_DIR=".tickets"
+        return 0
+    fi
+
+    # Queue-summary commands are allowed to behave like an empty ticket store.
+    if [[ $allow_missing_store -eq 1 ]]; then
         TICKETS_DIR=".tickets"
         return 0
     fi
@@ -1432,7 +1444,7 @@ fi
 # Initialize tickets dir for built-in commands (skip for help)
 case "${1:-help}" in
     help|--help|-h) ;;
-    *) init_tickets_dir "${1:-}" || exit 1 ;;
+    *) init_tickets_dir "$@" || exit 1 ;;
 esac
 
 # Built-in commands

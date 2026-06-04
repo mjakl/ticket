@@ -7,6 +7,7 @@
 - Subcommands now accept `--help`/`-h` without requiring an existing ticket store
 - `create -d -`/`create --description -` can read descriptions from stdin for safer multiline ticket text
 - `init` command to create `.tickets/` and ignore it by default, with `--tracked` for committed ticket stores
+- Queue-summary commands such as `list`, `ready`, `blocked`, `tree`, `closed`, and `done` now behave like an empty queue when no ticket store exists
 
 ## [0.5.0] - 2026-03-20
 

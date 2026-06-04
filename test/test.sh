@@ -331,6 +331,31 @@ test_init_creates_store_and_gitignore() {
     rm -rf "$dir" "$tracked_dir"
 }
 
+test_read_commands_allow_missing_store() {
+    local dir cmd
+    dir=$(new_workspace)
+
+    for cmd in list ready blocked tree closed; do
+        run_in_dir "$dir" "$TK" "$cmd"
+        assert_status 0
+        assert_equals ""
+    done
+
+    run_in_dir "$dir" "$TK" dep tree
+    assert_status 0
+    assert_equals ""
+
+    run_in_dir "$dir" "$TK" done
+    assert_status 0
+    assert_contains "All tickets are closed"
+
+    run_in_dir "$dir" "$TK" show missing
+    assert_status 1
+    assert_contains "Error: no .tickets directory found"
+
+    rm -rf "$dir"
+}
+
 test_create_reads_description_from_stdin() {
     local dir id
     dir=$(new_workspace)
@@ -545,6 +570,7 @@ main() {
     run_test test_parser_errors_are_not_suppressed
     run_test test_subcommand_help_does_not_need_ticket_store
     run_test test_init_creates_store_and_gitignore
+    run_test test_read_commands_allow_missing_store
     run_test test_create_reads_description_from_stdin
     run_test test_create_show_and_status_flow
     run_test test_dep_and_undep_flow
