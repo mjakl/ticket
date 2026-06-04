@@ -57,11 +57,16 @@ Examples:
   tk dep publish-id changelog-id   # publish is blocked by changelog
 ```
 
-For longer descriptions, use stdin to avoid shell quoting issues:
+For longer descriptions or notes, use stdin to avoid shell quoting issues:
 
 ```bash
 tk create "Investigate modal behavior" -d - <<'EOF'
 Capture context, examples, and acceptance criteria here.
+Backticks, quotes, and $VARIABLES stay literal with the quoted EOF marker.
+EOF
+
+tk add-note abc123 <<'EOF'
+Record progress, decisions, validation, and follow-up context here.
 Backticks, quotes, and $VARIABLES stay literal with the quoted EOF marker.
 EOF
 ```
