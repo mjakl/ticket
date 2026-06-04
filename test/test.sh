@@ -304,6 +304,33 @@ test_subcommand_help_does_not_need_ticket_store() {
     rm -rf "$dir"
 }
 
+test_init_creates_store_and_gitignore() {
+    local dir count tracked_dir
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" init
+    assert_status 0
+    assert_contains "Initialized .tickets"
+    assert_contains "Ignored .tickets/"
+    [[ -d "$dir/.tickets" ]] || fail "expected .tickets directory"
+    grep -Eq '^\.tickets/$' "$dir/.gitignore" || fail "expected .tickets/ in .gitignore"
+
+    run_in_dir "$dir" "$TK" init
+    assert_status 0
+    assert_contains ".tickets/ already ignored"
+    count=$(grep -Ec '^\.tickets/$' "$dir/.gitignore")
+    [[ "$count" -eq 1 ]] || fail "expected one .tickets/ entry, got $count"
+
+    tracked_dir=$(new_workspace)
+    run_in_dir "$tracked_dir" "$TK" init --tracked
+    assert_status 0
+    assert_contains "Leaving tickets trackable by git"
+    [[ -d "$tracked_dir/.tickets" ]] || fail "expected tracked .tickets directory"
+    [[ ! -f "$tracked_dir/.gitignore" ]] || fail "did not expect .gitignore for tracked init"
+
+    rm -rf "$dir" "$tracked_dir"
+}
+
 test_create_reads_description_from_stdin() {
     local dir id
     dir=$(new_workspace)
@@ -517,6 +544,7 @@ main() {
     run_test test_create_retries_on_id_collision
     run_test test_parser_errors_are_not_suppressed
     run_test test_subcommand_help_does_not_need_ticket_store
+    run_test test_init_creates_store_and_gitignore
     run_test test_create_reads_description_from_stdin
     run_test test_create_show_and_status_flow
     run_test test_dep_and_undep_flow

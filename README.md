@@ -24,6 +24,7 @@ tk - minimal ticket system with dependency tracking
 Usage: tk <command> [args]
 
 Commands:
+  init [--tracked]         Initialize .tickets/ and ignore it by default
   create [title] [options] Create ticket, prints ID
     -d, --description      Description text, or '-' to read from stdin
     -p, --priority         Priority 0-4, 0=highest [default: 2]
@@ -49,6 +50,7 @@ Commands:
 Create work with 'tk create "Title"' and optionally group it under a larger task with '--parent <id>' to model a subtask. Use 'tk dep <id> <dep-id>' when one ticket is blocked by another ticket and cannot be completed first. In other words, A -> B means ticket A depends on B. Use parent/child links to describe breakdown of work, and dependency links to describe execution order or blocking relationships.
 
 Examples:
+  tk init
   tk create "Ship release notes"
   tk create "Draft changelog" --parent abc123
   tk create "Publish GitHub release" --parent abc123
@@ -77,6 +79,7 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 ## Notes
 
 - Tickets are stored as Markdown files in `.tickets/`
+- `tk init` creates `.tickets/` and adds `.tickets/` to `.gitignore`; use `tk init --tracked` if you want tickets committed
 - Set `TICKETS_DIR` to use a different ticket directory
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
 - Supports partial ID matching (e.g. `tk show 1a2` matches `1a2b3c`)

@@ -27,7 +27,7 @@ find_tickets_dir() {
 }
 
 # Commands that can create .tickets if not found
-WRITE_COMMANDS="create"
+WRITE_COMMANDS="create init"
 
 # Initialize TICKETS_DIR based on command type
 init_tickets_dir() {
@@ -51,7 +51,7 @@ init_tickets_dir() {
     fi
 
     echo "Error: no .tickets directory found (searched parent directories)" >&2
-    echo "Run 'tk create' to initialize, or set TICKETS_DIR env var" >&2
+    echo "Run 'tk init' or 'tk create' to initialize, or set TICKETS_DIR env var" >&2
     return 1
 }
 
@@ -298,6 +298,60 @@ validate_priority() {
 
     echo "Error: invalid priority '$priority'. Must be an integer from 0 to 4" >&2
     return 1
+}
+
+cmd_init() {
+    local tracked=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --tracked)
+                tracked=1
+                shift
+                ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                echo "Unexpected argument: $1" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    ensure_dir
+    echo "Initialized $TICKETS_DIR"
+
+    if [[ $tracked -eq 1 ]]; then
+        echo "Leaving tickets trackable by git"
+        return 0
+    fi
+
+    if [[ "$(basename "$TICKETS_DIR")" != ".tickets" ]]; then
+        echo "Skipped .gitignore update for custom TICKETS_DIR"
+        return 0
+    fi
+
+    local base_dir gitignore
+    base_dir=$(cd "$(dirname "$TICKETS_DIR")" && pwd)
+    gitignore="$base_dir/.gitignore"
+
+    if [[ -f "$gitignore" ]] && grep -Eq '^[[:space:]]*/?\.tickets/?[[:space:]]*$' "$gitignore"; then
+        echo ".tickets/ already ignored in $gitignore"
+        return 0
+    fi
+
+    if [[ -f "$gitignore" && -s "$gitignore" ]]; then
+        if [[ "$(tail -c 1 "$gitignore" 2>/dev/null || true)" != "" ]]; then
+            printf '\n' >> "$gitignore"
+        fi
+        printf '.tickets/\n' >> "$gitignore"
+    else
+        printf '.tickets/\n' > "$gitignore"
+    fi
+
+    echo "Ignored .tickets/ in $gitignore"
 }
 
 cmd_create() {
@@ -1333,6 +1387,7 @@ $cmd - minimal ticket system with dependency tracking
 Usage: $cmd <command> [args]
 
 Commands:
+  init [--tracked]         Initialize .tickets/ and ignore it by default
   create [title] [options] Create ticket, prints ID
     -d, --description      Description text, or '-' to read from stdin
     -p, --priority         Priority 0-4, 0=highest [default: 2]
@@ -1382,6 +1437,7 @@ esac
 
 # Built-in commands
 case "${1:-help}" in
+    init)   shift; cmd_init "$@" ;;
     create) shift; cmd_create "$@" ;;
     start)  shift; cmd_start "$@" ;;
     close)  shift; cmd_close "$@" ;;
