@@ -36,12 +36,12 @@ Commands:
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   undep <id> <dep-id>      Remove dependency
-  ls|list [--status=X]     List tickets
+  ls|list [--status X]     List tickets
   tree [id]                Show tickets in parent/child hierarchy
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
   done                     Exit 0 when all tickets are closed, 1 otherwise
-  closed [--limit=N]       List recently closed tickets (default 20, by mtime)
+  closed [--limit N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete closed tickets not reachable from non-closed tickets
   delete <id>              Delete one unreferenced ticket
   show <id>                Display ticket

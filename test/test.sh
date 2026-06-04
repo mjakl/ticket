@@ -374,6 +374,58 @@ test_create_reads_description_from_stdin() {
     rm -rf "$dir"
 }
 
+test_list_and_closed_option_parsing() {
+    local dir line_count
+    dir=$(new_workspace)
+
+    write_ticket_file "$dir" open01 open "Open ticket"
+    write_ticket_file "$dir" prog01 in_progress "Progress ticket"
+    write_ticket_file "$dir" shut01 closed "Closed ticket"
+    write_ticket_file "$dir" shut02 closed "Second closed ticket"
+
+    run_in_dir "$dir" "$TK" list --status open
+    assert_status 0
+    assert_contains "open01"
+    assert_not_contains "prog01"
+    assert_not_contains "shut01"
+
+    run_in_dir "$dir" "$TK" list --status open --status in_progress
+    assert_status 0
+    assert_contains "open01"
+    assert_contains "prog01"
+    assert_not_contains "shut01"
+
+    run_in_dir "$dir" "$TK" list --status=closed
+    assert_status 0
+    assert_contains "shut01"
+    assert_contains "shut02"
+    assert_not_contains "open01"
+
+    run_in_dir "$dir" "$TK" list --format json
+    assert_status 1
+    assert_contains "Unknown option: --format"
+
+    run_in_dir "$dir" "$TK" list --status bogus
+    assert_status 1
+    assert_contains "Error: invalid status 'bogus'"
+
+    run_in_dir "$dir" "$TK" closed --limit 1
+    assert_status 0
+    line_count=$(printf '%s\n' "$LAST_OUTPUT" | sed '/^$/d' | wc -l)
+    [[ "$line_count" -eq 1 ]] || fail "expected one closed ticket, got $line_count"
+
+    run_in_dir "$dir" "$TK" closed --limit=1
+    assert_status 0
+    line_count=$(printf '%s\n' "$LAST_OUTPUT" | sed '/^$/d' | wc -l)
+    [[ "$line_count" -eq 1 ]] || fail "expected one closed ticket, got $line_count"
+
+    run_in_dir "$dir" "$TK" closed --all
+    assert_status 1
+    assert_contains "Unknown option: --all"
+
+    rm -rf "$dir"
+}
+
 test_create_show_and_status_flow() {
     local dir id
     dir=$(new_workspace)
@@ -572,6 +624,7 @@ main() {
     run_test test_init_creates_store_and_gitignore
     run_test test_read_commands_allow_missing_store
     run_test test_create_reads_description_from_stdin
+    run_test test_list_and_closed_option_parsing
     run_test test_create_show_and_status_flow
     run_test test_dep_and_undep_flow
     run_test test_partial_id_resolution_and_ambiguity

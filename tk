@@ -312,6 +312,15 @@ validate_priority() {
     return 1
 }
 
+validate_positive_int() {
+    local option="$1"
+    local value="$2"
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] && return 0
+
+    echo "Error: invalid $option '$value'. Must be a positive integer" >&2
+    return 1
+}
+
 cmd_init() {
     local tracked=0
 
@@ -680,11 +689,37 @@ cmd_dep() {
 }
 
 cmd_ls() {
-    local status_filter=""
+    local status_filter="" status_value
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --status=*) status_filter="${1#--status=}"; shift ;;
-            *) shift ;;
+            --status=*)
+                status_value="${1#--status=}"
+                if [[ -z "$status_value" ]]; then
+                    echo "Error: --status requires a value" >&2
+                    return 1
+                fi
+                validate_status "$status_value" || return 1
+                status_filter="${status_filter:+$status_filter }$status_value"
+                shift
+                ;;
+            --status)
+                if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+                    echo "Error: --status requires a value" >&2
+                    return 1
+                fi
+                status_value="$2"
+                validate_status "$status_value" || return 1
+                status_filter="${status_filter:+$status_filter }$status_value"
+                shift 2
+                ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                echo "Unexpected argument: $1" >&2
+                return 1
+                ;;
         esac
     done
 
@@ -708,8 +743,11 @@ cmd_ls() {
     }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
     END { if (prev_file) emit() }
+    function status_matches() {
+        return status_filter == "" || index(" " status_filter " ", " " status " ") > 0
+    }
     function emit() {
-        if (id != "" && (status_filter == "" || status == status_filter)) {
+        if (id != "" && status_matches()) {
             deps_display = (deps != "") ? "[" deps "]" : "[]"
             gsub(/,/, ", ", deps_display)
             dep_str = (deps_display != "[]") ? " <- " deps_display : ""
@@ -967,8 +1005,32 @@ cmd_closed() {
     local limit=20
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --limit=*) limit="${1#--limit=}"; shift ;;
-            *) shift ;;
+            --limit=*)
+                limit="${1#--limit=}"
+                if [[ -z "$limit" ]]; then
+                    echo "Error: --limit requires a value" >&2
+                    return 1
+                fi
+                validate_positive_int "--limit" "$limit" || return 1
+                shift
+                ;;
+            --limit)
+                if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
+                    echo "Error: --limit requires a value" >&2
+                    return 1
+                fi
+                limit="$2"
+                validate_positive_int "--limit" "$limit" || return 1
+                shift 2
+                ;;
+            -*)
+                echo "Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                echo "Unexpected argument: $1" >&2
+                return 1
+                ;;
         esac
     done
 
@@ -1411,12 +1473,12 @@ Commands:
   dep <id> <dep-id>        Add dependency (id depends on dep-id)
   dep tree [--full] [id]   Show dependency tree, optionally for one ticket
   undep <id> <dep-id>      Remove dependency
-  ls|list [--status=X]     List tickets
+  ls|list [--status X]     List tickets
   tree [id]                Show tickets in parent/child hierarchy
   ready                    List open/in-progress tickets with deps resolved
   blocked                  List open/in-progress tickets with unresolved deps
   done                     Exit 0 when all tickets are closed, 1 otherwise
-  closed [--limit=N]       List recently closed tickets (default 20, by mtime)
+  closed [--limit N]       List recently closed tickets (default 20, by mtime)
   prune                    Delete closed tickets not reachable from non-closed tickets
   delete <id>              Delete one unreferenced ticket
   show <id>                Display ticket
