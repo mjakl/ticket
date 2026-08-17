@@ -4,13 +4,15 @@
 
 ### Added
 - `done` command for automation-friendly completion checks; exits `0` when all tickets are closed and `1` while any ticket remains unfinished
-- Subcommands now accept `--help`/`-h` without requiring an existing ticket store
+- Subcommands now provide focused `--help`/`-h` output without requiring an existing ticket store
 - `create -d -`/`create --description -` can read descriptions from stdin for safer multiline ticket text
 - `init` command to create `.tickets/` and ignore it by default, with `--tracked` for committed ticket stores
 - Queue-summary commands such as `list`, `ready`, `blocked`, `tree`, `closed`, and `done` now behave like an empty queue when no ticket store exists
 - `list --status X` and `closed --limit N` space-separated option values are now accepted
 
 ### Fixed
+- Commands now reject unexpected arguments and unknown options before changing ticket state
+- Repeated status changes are true no-ops and preserve ticket modification times
 - `list` and `closed` now reject unknown options instead of silently ignoring them
 - `undep` is now idempotent when the dependency is already absent
 

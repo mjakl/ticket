@@ -65,6 +65,15 @@ first_ticket_id() {
     basename "${files[0]}" .md
 }
 
+file_mtime() {
+    local file="$1"
+    if stat -c %Y "$file" >/dev/null 2>&1; then
+        stat -c %Y "$file"
+    else
+        stat -f %m "$file"
+    fi
+}
+
 write_ticket_file() {
     local dir="$1"
     local id="$2"
@@ -295,11 +304,43 @@ test_subcommand_help_does_not_need_ticket_store() {
 
     run_in_dir "$dir" "$TK" create --help
     assert_status 0
-    assert_contains "create [title] [options]"
+    assert_contains "Usage: tk create [title] [options]"
+    assert_contains "--priority <0-4>"
+    assert_not_contains "closed [--limit N]"
 
     run_in_dir "$dir" "$TK" help create
     assert_status 0
-    assert_contains "create [title] [options]"
+    assert_contains "Usage: tk create [title] [options]"
+    assert_not_contains "closed [--limit N]"
+
+    run_in_dir "$dir" "$TK" create "Ignored title" --help
+    assert_status 0
+    assert_contains "Usage: tk create [title] [options]"
+    [[ ! -d "$dir/.tickets" ]] || fail "help should not initialize a ticket store"
+
+    run_in_dir "$dir" "$TK" dep tree missing --help
+    assert_status 0
+    assert_contains "Usage: tk dep tree [--full] [id]"
+    [[ ! -d "$dir/.tickets" ]] || fail "nested help should not initialize a ticket store"
+
+    run_in_dir "$dir" "$TK" dep tree --help
+    assert_status 0
+    assert_contains "Usage: tk dep tree [--full] [id]"
+    assert_contains "--full"
+    assert_not_contains "no .tickets directory found"
+
+    run_in_dir "$dir" "$TK" help dep tree
+    assert_status 0
+    assert_contains "Usage: tk dep tree [--full] [id]"
+
+    run_in_dir "$dir" "$TK" ready --help
+    assert_status 0
+    assert_contains "Usage: tk ready"
+    assert_not_contains "create [title] [options]"
+
+    run_in_dir "$dir" "$TK" help dep-tree
+    assert_status 1
+    assert_contains "Unknown help topic: dep-tree"
 
     rm -rf "$dir"
 }
@@ -371,6 +412,13 @@ test_create_reads_description_from_stdin() {
     assert_contains '`literal selector`'
     assert_contains '$VALUE stays literal'
 
+    run_in_dir "$dir" "$TK" create "Dash description" "--description=-starts with dash"
+    assert_status 0
+    id="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "-starts with dash"
+
     rm -rf "$dir"
 }
 
@@ -426,6 +474,111 @@ test_list_and_closed_option_parsing() {
     rm -rf "$dir"
 }
 
+test_commands_reject_unexpected_arguments() {
+    local dir invalid_dir id other_id
+    invalid_dir=$(new_workspace)
+
+    run_in_dir "$invalid_dir" "$TK" create "First" "Second"
+    assert_status 1
+    assert_contains "Unexpected argument: Second"
+    assert_contains "Usage: tk create [title] [options]"
+    [[ ! -d "$invalid_dir/.tickets" ]] || fail "invalid create should not initialize a ticket store"
+
+    run_in_dir "$invalid_dir" "$TK" create -d --bogus
+    assert_status 1
+    assert_contains "Error: -d requires a value"
+    [[ ! -d "$invalid_dir/.tickets" ]] || fail "invalid description option should not initialize a ticket store"
+
+    run_in_dir "$invalid_dir" "$TK" create "Child" --parent missing
+    assert_status 1
+    assert_contains "Error: ticket 'missing' not found"
+    [[ ! -d "$invalid_dir/.tickets" ]] || fail "invalid parent should not initialize a ticket store"
+    rm -rf "$invalid_dir"
+
+    dir=$(new_workspace)
+    run_in_dir "$dir" "$TK" create "Primary"
+    assert_status 0
+    id="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" create "Other"
+    assert_status 0
+    other_id="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" start "$id" extra
+    assert_status 1
+    assert_contains "Usage: tk start <id>"
+    run_in_dir "$dir" "$TK" close "$id" extra
+    assert_status 1
+    assert_contains "Usage: tk close <id>"
+    run_in_dir "$dir" "$TK" reopen "$id" extra
+    assert_status 1
+    assert_contains "Usage: tk reopen <id>"
+    run_in_dir "$dir" "$TK" status "$id" closed extra
+    assert_status 1
+    assert_contains "Usage: tk status <id> <status>"
+
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "status: open"
+
+    run_in_dir "$dir" "$TK" dep "$id" "$other_id" extra
+    assert_status 1
+    assert_contains "Usage: tk dep <id> <dependency-id>"
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "deps: []"
+
+    run_in_dir "$dir" "$TK" dep "$id" "$other_id"
+    assert_status 0
+    run_in_dir "$dir" "$TK" undep "$id" "$other_id" extra
+    assert_status 1
+    assert_contains "Usage: tk undep <id> <dependency-id>"
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "deps: [$other_id]"
+
+    run_in_dir "$dir" "$TK" dep tree --bogus
+    assert_status 1
+    assert_contains "Unknown option: --bogus"
+    assert_contains "Usage: tk dep tree [--full] [id]"
+    run_in_dir "$dir" "$TK" tree --bogus
+    assert_status 1
+    assert_contains "Unknown option: --bogus"
+    run_in_dir "$dir" "$TK" ready extra
+    assert_status 1
+    assert_contains "Unexpected argument: extra"
+    run_in_dir "$dir" "$TK" blocked --bogus
+    assert_status 1
+    assert_contains "Unknown option: --bogus"
+
+    run_in_dir "$dir" "$TK" delete "$id" extra
+    assert_status 1
+    assert_contains "Usage: tk delete <id>"
+    [[ -f "$dir/.tickets/$id.md" ]] || fail "invalid delete should not remove the ticket"
+    run_in_dir "$dir" "$TK" show "$id" extra
+    assert_status 1
+    assert_contains "Usage: tk show <id>"
+
+    cp "$dir/.tickets/$id.md" "$dir/ticket-before-option.md"
+    run_in_dir "$dir" "$TK" add-note "$id" --bogus
+    assert_status 1
+    assert_contains "Unknown option: --bogus"
+    cmp -s "$dir/.tickets/$id.md" "$dir/ticket-before-option.md" || fail "unknown add-note option should not change the ticket"
+
+    run_in_dir "$dir" "$TK" add-note "$id" -- "--help is literal text"
+    assert_status 0
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "--help is literal text"
+
+    cp "$dir/.tickets/$id.md" "$dir/ticket-before-help.md"
+    run_in_dir "$dir" "$TK" add-note "$id" --help
+    assert_status 0
+    assert_contains "Usage: tk add-note <id> [note text]"
+    cmp -s "$dir/.tickets/$id.md" "$dir/ticket-before-help.md" || fail "help should not append a note"
+
+    rm -rf "$dir"
+}
+
 test_create_show_and_status_flow() {
     local dir id
     dir=$(new_workspace)
@@ -453,6 +606,52 @@ test_create_show_and_status_flow() {
     run_in_dir "$dir" "$TK" show "$id"
     assert_status 0
     assert_contains "status: closed"
+
+    rm -rf "$dir"
+}
+
+test_status_updates_are_true_noops() {
+    local dir id file before after
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Stable status"
+    assert_status 0
+    id="$LAST_OUTPUT"
+    file="$dir/.tickets/$id.md"
+
+    touch -t 202001010000 "$file"
+    before=$(file_mtime "$file")
+    run_in_dir "$dir" "$TK" status "$id" open
+    assert_status 0
+    assert_contains "Ticket $id is already open"
+    after=$(file_mtime "$file")
+    [[ "$after" == "$before" ]] || fail "expected no-op status to preserve mtime"
+
+    run_in_dir "$dir" "$TK" reopen "$id"
+    assert_status 0
+    assert_contains "Ticket $id is already open"
+    after=$(file_mtime "$file")
+    [[ "$after" == "$before" ]] || fail "expected no-op reopen to preserve mtime"
+
+    run_in_dir "$dir" "$TK" start "$id"
+    assert_status 0
+    touch -t 202001010000 "$file"
+    before=$(file_mtime "$file")
+    run_in_dir "$dir" "$TK" start "$id"
+    assert_status 0
+    assert_contains "Ticket $id is already in_progress"
+    after=$(file_mtime "$file")
+    [[ "$after" == "$before" ]] || fail "expected no-op start to preserve mtime"
+
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 0
+    touch -t 202001010000 "$file"
+    before=$(file_mtime "$file")
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 0
+    assert_contains "Ticket $id is already closed"
+    after=$(file_mtime "$file")
+    [[ "$after" == "$before" ]] || fail "expected no-op close to preserve mtime"
 
     rm -rf "$dir"
 }
@@ -629,7 +828,9 @@ main() {
     run_test test_read_commands_allow_missing_store
     run_test test_create_reads_description_from_stdin
     run_test test_list_and_closed_option_parsing
+    run_test test_commands_reject_unexpected_arguments
     run_test test_create_show_and_status_flow
+    run_test test_status_updates_are_true_noops
     run_test test_dep_and_undep_flow
     run_test test_partial_id_resolution_and_ambiguity
     run_test test_delete_refuses_referenced_tickets

@@ -297,7 +297,8 @@ require_option_value() {
     fi
 
     case "$value" in
-        -d|--description|-p|--priority|--parent)
+        -) ;;
+        -*)
             echo "Error: $option requires a value" >&2
             return 1
             ;;
@@ -321,6 +322,43 @@ validate_positive_int() {
     return 1
 }
 
+print_usage() {
+    local topic="$1"
+    local cmd
+    cmd=$(basename "$0")
+
+    case "$topic" in
+        init)     echo "Usage: $cmd init [--tracked]" ;;
+        create)   echo "Usage: $cmd create [title] [options]" ;;
+        start)    echo "Usage: $cmd start <id>" ;;
+        close)    echo "Usage: $cmd close <id>" ;;
+        reopen)   echo "Usage: $cmd reopen <id>" ;;
+        status)   echo "Usage: $cmd status <id> <status>" ;;
+        dep)      echo "Usage: $cmd dep <id> <dependency-id>" ;;
+        dep-tree) echo "Usage: $cmd dep tree [--full] [id]" ;;
+        undep)    echo "Usage: $cmd undep <id> <dependency-id>" ;;
+        list)     echo "Usage: $cmd list [--status <status>]..." ;;
+        tree)     echo "Usage: $cmd tree [id]" ;;
+        ready)    echo "Usage: $cmd ready" ;;
+        blocked)  echo "Usage: $cmd blocked" ;;
+        done)     echo "Usage: $cmd done" ;;
+        closed)   echo "Usage: $cmd closed [--limit <number>]" ;;
+        prune)    echo "Usage: $cmd prune" ;;
+        delete)   echo "Usage: $cmd delete <id>" ;;
+        show)     echo "Usage: $cmd show <id>" ;;
+        add-note) echo "Usage: $cmd add-note <id> [note text]" ;;
+        help)     echo "Usage: $cmd help [command [subcommand]]" ;;
+        *)        return 1 ;;
+    esac
+}
+
+print_argument_error() {
+    local topic="$1"
+    local message="$2"
+    echo "$message" >&2
+    print_usage "$topic" >&2
+}
+
 cmd_init() {
     local tracked=0
 
@@ -331,11 +369,11 @@ cmd_init() {
                 shift
                 ;;
             -*)
-                echo "Unknown option: $1" >&2
+                print_argument_error init "Unknown option: $1"
                 return 1
                 ;;
             *)
-                echo "Unexpected argument: $1" >&2
+                print_argument_error init "Unexpected argument: $1"
                 return 1
                 ;;
         esac
@@ -376,16 +414,24 @@ cmd_init() {
 }
 
 cmd_create() {
-    ensure_dir
-
     local title="" description=""
     local priority=2 parent=""
+    local title_set=0
 
-    # Parse args
+    # Parse and validate all arguments before creating the ticket store.
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            -d=*|--description=*)
+                description="${1#*=}"
+                if [[ -z "$description" ]]; then
+                    echo "Error: ${1%%=*} requires a value" >&2
+                    print_usage create >&2
+                    return 1
+                fi
+                shift
+                ;;
             -d|--description)
-                require_option_value "$1" "${2:-}" || return 1
+                require_option_value "$1" "${2:-}" || { print_usage create >&2; return 1; }
                 if [[ "$2" == "-" ]]; then
                     description=$(cat)
                 else
@@ -394,29 +440,45 @@ cmd_create() {
                 shift 2
                 ;;
             -p|--priority)
-                require_option_value "$1" "${2:-}" || return 1
+                require_option_value "$1" "${2:-}" || { print_usage create >&2; return 1; }
                 priority="$2"
                 shift 2
                 ;;
             --parent)
-                require_option_value "$1" "${2:-}" || return 1
+                require_option_value "$1" "${2:-}" || { print_usage create >&2; return 1; }
                 parent="$2"
                 shift 2
                 ;;
-            -*) echo "Unknown option: $1" >&2; return 1 ;;
-            *) title="$1"; shift ;;
+            -*)
+                print_argument_error create "Unknown option: $1"
+                return 1
+                ;;
+            *)
+                if [[ $title_set -eq 1 ]]; then
+                    print_argument_error create "Unexpected argument: $1"
+                    return 1
+                fi
+                title="$1"
+                title_set=1
+                shift
+                ;;
         esac
     done
 
-    validate_priority "$priority" || return 1
+    validate_priority "$priority" || { print_usage create >&2; return 1; }
 
-    # Validate and resolve parent if specified
+    # Validate and resolve the parent before creating the ticket store.
     if [[ -n "$parent" ]]; then
+        if [[ ! -d "$TICKETS_DIR" ]]; then
+            echo "Error: ticket '$parent' not found" >&2
+            return 1
+        fi
         local parent_file
         parent_file=$(ticket_path "$parent") || return 1
         parent=$(basename "$parent_file" .md)
     fi
 
+    ensure_dir
     title="${title:-Untitled}"
     local id file
     local attempts=0
@@ -468,9 +530,15 @@ validate_status() {
 }
 
 cmd_status() {
-    if [[ $# -lt 2 ]]; then
-        echo "Usage: $(basename "$0") status <id> <status>" >&2
+    if [[ $# -ne 2 ]]; then
+        print_usage status >&2
         echo "Valid statuses: $VALID_STATUSES" >&2
+        return 1
+    fi
+    if [[ "$1" == -* || "$2" == -* ]]; then
+        local invalid_arg="$1"
+        [[ "$2" == -* ]] && invalid_arg="$2"
+        print_argument_error status "Unknown option: $invalid_arg"
         return 1
     fi
 
@@ -479,32 +547,51 @@ cmd_status() {
 
     validate_status "$status" || return 1
 
-    local file
+    local file current_status resolved_id
     file=$(ticket_path "$id") || return 1
+    resolved_id=$(basename "$file" .md)
+    current_status=$(yaml_field "$file" "status")
+
+    if [[ "$current_status" == "$status" ]]; then
+        echo "Ticket $resolved_id is already $status"
+        return 0
+    fi
 
     update_yaml_field "$file" "status" "$status"
-    echo "Updated $(basename "$file" .md) -> $status"
+    echo "Updated $resolved_id -> $status"
 }
 
 cmd_start() {
-    if [[ $# -lt 1 ]]; then
-        echo "Usage: $(basename "$0") start <id>" >&2
+    if [[ $# -ne 1 ]]; then
+        print_usage start >&2
+        return 1
+    fi
+    if [[ "$1" == -* ]]; then
+        print_argument_error start "Unknown option: $1"
         return 1
     fi
     cmd_status "$1" "in_progress"
 }
 
 cmd_close() {
-    if [[ $# -lt 1 ]]; then
-        echo "Usage: $(basename "$0") close <id>" >&2
+    if [[ $# -ne 1 ]]; then
+        print_usage close >&2
+        return 1
+    fi
+    if [[ "$1" == -* ]]; then
+        print_argument_error close "Unknown option: $1"
         return 1
     fi
     cmd_status "$1" "closed"
 }
 
 cmd_reopen() {
-    if [[ $# -lt 1 ]]; then
-        echo "Usage: $(basename "$0") reopen <id>" >&2
+    if [[ $# -ne 1 ]]; then
+        print_usage reopen >&2
+        return 1
+    fi
+    if [[ "$1" == -* ]]; then
+        print_argument_error reopen "Unknown option: $1"
         return 1
     fi
     cmd_status "$1" "open"
@@ -517,9 +604,13 @@ cmd_dep_tree() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --full) full_mode=1; shift ;;
+            -*)
+                print_argument_error dep-tree "Unknown option: $1"
+                return 1
+                ;;
             *)
                 if [[ -n "$root_id" ]]; then
-                    echo "Usage: $(basename "$0") dep tree [--full] [id]" >&2
+                    print_argument_error dep-tree "Unexpected argument: $1"
                     return 1
                 fi
                 root_id="$1"
@@ -652,9 +743,15 @@ cmd_dep() {
         return
     fi
 
-    if [[ $# -lt 2 ]]; then
-        echo "Usage: ticket dep <id> <dependency-id>" >&2
-        echo "       ticket dep tree [id]  - show dependency tree" >&2
+    if [[ $# -ne 2 ]]; then
+        print_usage dep >&2
+        echo "       $(basename "$0") dep tree [--full] [id]" >&2
+        return 1
+    fi
+    if [[ "$1" == -* || "$2" == -* ]]; then
+        local invalid_arg="$1"
+        [[ "$2" == -* ]] && invalid_arg="$2"
+        print_argument_error dep "Unknown option: $invalid_arg"
         return 1
     fi
 
@@ -696,6 +793,7 @@ cmd_ls() {
                 status_value="${1#--status=}"
                 if [[ -z "$status_value" ]]; then
                     echo "Error: --status requires a value" >&2
+                    print_usage list >&2
                     return 1
                 fi
                 validate_status "$status_value" || return 1
@@ -705,6 +803,7 @@ cmd_ls() {
             --status)
                 if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
                     echo "Error: --status requires a value" >&2
+                    print_usage list >&2
                     return 1
                 fi
                 status_value="$2"
@@ -713,11 +812,11 @@ cmd_ls() {
                 shift 2
                 ;;
             -*)
-                echo "Unknown option: $1" >&2
+                print_argument_error list "Unknown option: $1"
                 return 1
                 ;;
             *)
-                echo "Unexpected argument: $1" >&2
+                print_argument_error list "Unexpected argument: $1"
                 return 1
                 ;;
         esac
@@ -761,11 +860,15 @@ cmd_tree() {
     local root_id=""
 
     if [[ $# -gt 1 ]]; then
-        echo "Usage: $(basename "$0") tree [id]" >&2
+        print_argument_error tree "Unexpected argument: $2"
         return 1
     fi
 
     if [[ $# -eq 1 ]]; then
+        if [[ "$1" == -* ]]; then
+            print_argument_error tree "Unknown option: $1"
+            return 1
+        fi
         local root_file
         root_file=$(ticket_path "$1") || return 1
         root_id=$(basename "$root_file" .md)
@@ -871,6 +974,15 @@ cmd_tree() {
 }
 
 cmd_ready() {
+    if [[ $# -gt 0 ]]; then
+        if [[ "$1" == -* ]]; then
+            print_argument_error ready "Unknown option: $1"
+        else
+            print_argument_error ready "Unexpected argument: $1"
+        fi
+        return 1
+    fi
+
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
@@ -942,7 +1054,11 @@ cmd_ready() {
 
 cmd_done() {
     if [[ $# -gt 0 ]]; then
-        echo "Usage: $(basename "$0") done" >&2
+        if [[ "$1" == -* ]]; then
+            print_argument_error "done" "Unknown option: $1"
+        else
+            print_argument_error "done" "Unexpected argument: $1"
+        fi
         return 1
     fi
 
@@ -1009,6 +1125,7 @@ cmd_closed() {
                 limit="${1#--limit=}"
                 if [[ -z "$limit" ]]; then
                     echo "Error: --limit requires a value" >&2
+                    print_usage closed >&2
                     return 1
                 fi
                 validate_positive_int "--limit" "$limit" || return 1
@@ -1017,6 +1134,7 @@ cmd_closed() {
             --limit)
                 if [[ -z "${2:-}" || "${2:-}" == -* ]]; then
                     echo "Error: --limit requires a value" >&2
+                    print_usage closed >&2
                     return 1
                 fi
                 limit="$2"
@@ -1024,11 +1142,11 @@ cmd_closed() {
                 shift 2
                 ;;
             -*)
-                echo "Unknown option: $1" >&2
+                print_argument_error closed "Unknown option: $1"
                 return 1
                 ;;
             *)
-                echo "Unexpected argument: $1" >&2
+                print_argument_error closed "Unexpected argument: $1"
                 return 1
                 ;;
         esac
@@ -1086,7 +1204,11 @@ ticket_outgoing_refs() {
 
 cmd_prune() {
     if [[ $# -gt 0 ]]; then
-        echo "Usage: $(basename "$0") prune" >&2
+        if [[ "$1" == -* ]]; then
+            print_argument_error prune "Unknown option: $1"
+        else
+            print_argument_error prune "Unexpected argument: $1"
+        fi
         return 1
     fi
 
@@ -1151,7 +1273,11 @@ cmd_prune() {
 
 cmd_delete() {
     if [[ $# -ne 1 ]]; then
-        echo "Usage: $(basename "$0") delete <id>" >&2
+        print_usage delete >&2
+        return 1
+    fi
+    if [[ "$1" == -* ]]; then
+        print_argument_error delete "Unknown option: $1"
         return 1
     fi
 
@@ -1170,6 +1296,15 @@ cmd_delete() {
 }
 
 cmd_blocked() {
+    if [[ $# -gt 0 ]]; then
+        if [[ "$1" == -* ]]; then
+            print_argument_error blocked "Unknown option: $1"
+        else
+            print_argument_error blocked "Unexpected argument: $1"
+        fi
+        return 1
+    fi
+
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
@@ -1248,8 +1383,14 @@ cmd_blocked() {
 }
 
 cmd_undep() {
-    if [[ $# -lt 2 ]]; then
-        echo "Usage: ticket undep <id> <dependency-id>" >&2
+    if [[ $# -ne 2 ]]; then
+        print_usage undep >&2
+        return 1
+    fi
+    if [[ "$1" == -* || "$2" == -* ]]; then
+        local invalid_arg="$1"
+        [[ "$2" == -* ]] && invalid_arg="$2"
+        print_argument_error undep "Unknown option: $invalid_arg"
         return 1
     fi
 
@@ -1276,8 +1417,12 @@ cmd_undep() {
 }
 
 cmd_show() {
-    if [[ $# -lt 1 ]]; then
-        echo "Usage: ticket show <id>" >&2
+    if [[ $# -ne 1 ]]; then
+        print_usage show >&2
+        return 1
+    fi
+    if [[ "$1" == -* ]]; then
+        print_argument_error show "Unknown option: $1"
         return 1
     fi
 
@@ -1422,13 +1567,31 @@ cmd_show() {
 
 cmd_add_note() {
     if [[ $# -lt 1 ]]; then
-        echo "Usage: ticket add-note <id> [note text]" >&2
+        print_usage add-note >&2
+        return 1
+    fi
+    if [[ "$1" == -* ]]; then
+        print_argument_error add-note "Unknown option: $1"
         return 1
     fi
 
-    local file
-    file=$(ticket_path "$1") || return 1
+    local id="$1"
     shift
+
+    if [[ "${1:-}" == "--" ]]; then
+        shift
+    else
+        local arg
+        for arg in "$@"; do
+            if [[ "$arg" == -* ]]; then
+                print_argument_error add-note "Unknown option: $arg"
+                return 1
+            fi
+        done
+    fi
+
+    local file
+    file=$(ticket_path "$id") || return 1
 
     local note
     if [[ $# -gt 0 ]]; then
@@ -1453,9 +1616,37 @@ cmd_add_note() {
 }
 
 cmd_help() {
-    local cmd
+    local cmd topic subtopic
     cmd=$(basename "$0")
-    cat << EOF
+    topic="${1:-}"
+    subtopic="${2:-}"
+
+    if [[ -z "$subtopic" && "$topic" == "dep-tree" ]]; then
+        echo "Unknown help topic: $topic" >&2
+        print_usage help >&2
+        return 1
+    fi
+
+    if [[ $# -gt 2 ]]; then
+        print_argument_error help "Unexpected argument: ${3}"
+        return 1
+    fi
+
+    if [[ -n "$subtopic" ]]; then
+        if [[ "$topic" == "dep" && "$subtopic" == "tree" ]]; then
+            topic="dep-tree"
+        else
+            echo "Unknown help topic: $topic $subtopic" >&2
+            print_usage help >&2
+            return 1
+        fi
+    fi
+
+    [[ "$topic" == "ls" ]] && topic="list"
+
+    case "$topic" in
+        "")
+            cat << EOF
 $cmd - minimal ticket system with dependency tracking
 
 Usage: $cmd <command> [args]
@@ -1492,15 +1683,269 @@ Examples:
   $cmd create "Publish GitHub release" --parent abc123
   $cmd dep publish-id changelog-id   # publish is blocked by changelog
 EOF
+            ;;
+        init)
+            print_usage init
+            cat << EOF
+
+Initialize the ticket store. By default, add .tickets/ to .gitignore.
+
+Options:
+  --tracked  Leave .tickets/ trackable by git
+
+Example:
+  $cmd init --tracked
+EOF
+            ;;
+        create)
+            print_usage create
+            cat << EOF
+
+Create an open ticket and print only its ID. The title defaults to "Untitled".
+
+Options:
+  -d, --description <text>  Description text, or '-' to read from stdin
+                             Use --description=<text> when text starts with '-'
+  -p, --priority <0-4>      Priority, 0=highest [default: 2]
+  --parent <id>             Parent ticket ID
+
+Examples:
+  $cmd create "Ship release notes"
+  $cmd create "Draft changelog" --parent abc123 -p 1
+EOF
+            ;;
+        start|close|reopen)
+            print_usage "$topic"
+            local target_status
+            case "$topic" in
+                start) target_status="in_progress" ;;
+                close) target_status="closed" ;;
+                reopen) target_status="open" ;;
+            esac
+            cat << EOF
+
+Set a ticket's status to $target_status. Partial IDs are accepted when unambiguous.
+Repeating the same status change is a successful no-op.
+
+Example:
+  $cmd $topic abc123
+EOF
+            ;;
+        status)
+            print_usage status
+            cat << EOF
+
+Set a ticket's status explicitly. Valid statuses: open, in_progress, closed.
+Partial IDs are accepted when unambiguous; unchanged status is a successful no-op.
+
+Example:
+  $cmd status abc123 in_progress
+EOF
+            ;;
+        dep)
+            print_usage dep
+            cat << EOF
+
+Add a blocking dependency: <id> depends on <dependency-id>.
+Use '$cmd dep tree --help' for dependency-tree options.
+
+Example:
+  $cmd dep task-id blocker-id
+EOF
+            ;;
+        dep-tree)
+            print_usage dep-tree
+            cat << EOF
+
+Show the global dependency graph, or focus it on one ticket.
+Shared nodes are abbreviated unless --full is used.
+
+Options:
+  --full  Repeat shared subgraphs in full
+
+Examples:
+  $cmd dep tree
+  $cmd dep tree --full abc123
+EOF
+            ;;
+        undep)
+            print_usage undep
+            cat << EOF
+
+Remove a blocking dependency. A missing relationship is a successful no-op.
+
+Example:
+  $cmd undep task-id blocker-id
+EOF
+            ;;
+        list)
+            print_usage list
+            cat << EOF
+
+List tickets. Repeat --status to include multiple statuses.
+
+Options:
+  --status <status>  Filter by open, in_progress, or closed
+
+Examples:
+  $cmd list
+  $cmd list --status open --status in_progress
+EOF
+            ;;
+        tree)
+            print_usage tree
+            cat << EOF
+
+Show tickets in their parent/child hierarchy, optionally focused on one ticket.
+
+Examples:
+  $cmd tree
+  $cmd tree abc123
+EOF
+            ;;
+        ready)
+            print_usage ready
+            cat << EOF
+
+List open or in-progress tickets whose dependencies are resolved.
+
+Example:
+  $cmd ready
+EOF
+            ;;
+        blocked)
+            print_usage blocked
+            cat << EOF
+
+List open or in-progress tickets with unresolved dependencies.
+
+Example:
+  $cmd blocked
+EOF
+            ;;
+        done)
+            print_usage "done"
+            cat << EOF
+
+Exit 0 when every ticket is closed; otherwise list unfinished tickets and exit 1.
+
+Example:
+  $cmd done
+EOF
+            ;;
+        closed)
+            print_usage closed
+            cat << EOF
+
+List recently closed tickets by file modification time.
+
+Options:
+  --limit <number>  Maximum tickets to show [default: 20]
+
+Example:
+  $cmd closed --limit 5
+EOF
+            ;;
+        prune)
+            print_usage prune
+            cat << EOF
+
+Delete closed tickets that are not reachable from any non-closed ticket.
+
+Example:
+  $cmd prune
+EOF
+            ;;
+        delete)
+            print_usage delete
+            cat << EOF
+
+Delete one ticket. Referenced tickets cannot be deleted.
+Partial IDs are accepted when unambiguous.
+
+Example:
+  $cmd delete abc123
+EOF
+            ;;
+        show)
+            print_usage show
+            cat << EOF
+
+Display a ticket with computed blockers, blocking tickets, and children.
+Partial IDs are accepted when unambiguous.
+
+Example:
+  $cmd show abc123
+EOF
+            ;;
+        add-note)
+            print_usage add-note
+            cat << EOF
+
+Append a UTC-timestamped note. When text is omitted, read it from stdin.
+Use '--' before note text that starts with '-'.
+
+Examples:
+  $cmd add-note abc123 "Validated the fix"
+  $cmd add-note abc123 -- "- follow-up needed"
+  printf '%s\n' "Multiline note" | $cmd add-note abc123
+EOF
+            ;;
+        help|--help|-h)
+            print_usage help
+            cat << EOF
+
+Show global help or focused help for one command.
+
+Examples:
+  $cmd help
+  $cmd help create
+  $cmd help dep tree
+EOF
+            ;;
+        *)
+            echo "Unknown help topic: $topic" >&2
+            print_usage help >&2
+            return 1
+            ;;
+    esac
 }
 
 # Main dispatch
 
-# Show subcommand help before ticket store initialization so commands like
-# `tk create --help` work even in repositories without .tickets/ yet.
-if [[ "${2:-}" == "--help" || "${2:-}" == "-h" ]]; then
-    cmd_help "${1:-help}"
+# Resolve help before ticket store initialization.
+if [[ "${1:-}" == "help" ]]; then
+    shift
+    cmd_help "$@"
+    exit $?
+fi
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    if [[ $# -ne 1 ]]; then
+        print_argument_error help "Unexpected argument: ${2}"
+        exit 1
+    fi
+    cmd_help
     exit 0
+fi
+
+# A help flag anywhere after a command takes precedence over validation and work.
+help_requested=0
+for arg in "${@:2}"; do
+    [[ "$arg" == "--" ]] && break
+    if [[ "$arg" == "--help" || "$arg" == "-h" ]]; then
+        help_requested=1
+        break
+    fi
+done
+
+if [[ $help_requested -eq 1 ]]; then
+    if [[ "${1:-}" == "dep" && "${2:-}" == "tree" ]]; then
+        cmd_help dep tree
+    else
+        cmd_help "${1:-help}"
+    fi
+    exit $?
 fi
 
 # Initialize tickets dir for built-in commands (skip for help)
