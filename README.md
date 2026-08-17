@@ -95,6 +95,8 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 - `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
 - `undep` is idempotent when the dependency is already absent and can remove a stored dependency after its target file is gone
+- Mutating commands use a store-wide writer lock, wait briefly for another writer, and fail clearly if the store remains busy
+- Ticket creation, updates, and notes are published atomically; rewrites preserve ticket permissions
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## Upstream

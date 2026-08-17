@@ -11,6 +11,9 @@
 - `list --status X` and `closed --limit N` space-separated option values are now accepted
 
 ### Fixed
+- Mutating commands now serialize through a portable store lock, briefly wait on contention, and recover locks owned by dead processes
+- Ticket creation, frontmatter updates, and notes now use atomic same-directory replacement with permission preservation and temporary cleanup
+- Random ID generation now handles the expected pipeline SIGPIPE without intermittent create failures
 - Ticket lookup now accepts only literal alphanumeric ID fragments and cannot traverse outside the store or follow ticket symlinks
 - `closed` now filters all closed tickets before sorting and applying `--limit`, without a hidden 100-file ceiling
 - `prune` now exits successfully after pruning all eligible tickets

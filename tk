@@ -84,13 +84,164 @@ _iso_date() {
 # Generate a random ticket ID
 generate_id() {
     local hash
-    hash=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
+    hash=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6 || true)
+    if [[ ! "$hash" =~ ^[a-z0-9]{6}$ ]]; then
+        echo "Error: failed to generate a ticket ID" >&2
+        return 1
+    fi
     printf '%s\n' "$hash"
 }
 
 # Ensure tickets directory exists
 ensure_dir() {
     mkdir -p "$TICKETS_DIR"
+}
+
+STORE_LOCK_HELD=0
+STORE_LOCK_PATH=""
+STORE_LOCK_TOKEN=""
+STORE_LAST_TEMP=""
+STORE_TEMP_FILES=()
+
+release_store_lock() {
+    [[ $STORE_LOCK_HELD -eq 1 ]] || return 0
+    local current=""
+    [[ -f "$STORE_LOCK_PATH" && ! -L "$STORE_LOCK_PATH" ]] && current=$(<"$STORE_LOCK_PATH")
+    if [[ "$current" == "$STORE_LOCK_TOKEN" ]]; then
+        rm -f "$STORE_LOCK_PATH"
+    fi
+    STORE_LOCK_HELD=0
+}
+
+cleanup_store_state() {
+    local tmp
+    for tmp in "${STORE_TEMP_FILES[@]}"; do
+        [[ -e "$tmp" || -L "$tmp" ]] && rm -f "$tmp"
+    done
+    release_store_lock
+}
+
+process_identity() {
+    local pid="$1"
+    local started
+    started=$(LC_ALL=C ps -p "$pid" -o lstart= 2>/dev/null) || return 1
+    read -r started <<< "$started"
+    [[ -n "$started" ]] || return 1
+    printf '%s:%s\n' "$pid" "$started"
+}
+
+lock_owner_is_alive() {
+    local token="$1"
+    local pid="${token%%:*}"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    [[ "$(process_identity "$pid" 2>/dev/null || true)" == "$token" ]]
+}
+
+reap_stale_store_lock() {
+    local expected_owner="$1"
+    local reaper="$STORE_LOCK_PATH.reaper"
+
+    # Only one process may reap a stale lock. A leftover reaper blocks
+    # automatic recovery rather than risking removal of a new live lock.
+    mkdir "$reaper" 2>/dev/null || return 0
+    if [[ -L "$reaper" || ! -d "$reaper" ]]; then
+        return 0
+    fi
+
+    local current_owner=""
+    [[ -f "$STORE_LOCK_PATH" && ! -L "$STORE_LOCK_PATH" ]] && current_owner=$(<"$STORE_LOCK_PATH")
+    if [[ "$current_owner" == "$expected_owner" ]] && ! lock_owner_is_alive "$current_owner"; then
+        rm -f "$STORE_LOCK_PATH"
+    fi
+    rmdir "$reaper" 2>/dev/null || true
+}
+
+acquire_store_lock() {
+    ensure_dir
+    STORE_LOCK_PATH="$TICKETS_DIR/.lock"
+    STORE_LOCK_TOKEN=$(process_identity "$$") || {
+        echo "Error: could not determine lock owner" >&2
+        return 1
+    }
+
+    local attempt owner
+    for ((attempt = 0; attempt <= 21; attempt++)); do
+        if (set -o noclobber; printf '%s\n' "$STORE_LOCK_TOKEN" > "$STORE_LOCK_PATH") 2>/dev/null; then
+            if ! chmod 644 "$STORE_LOCK_PATH"; then
+                rm -f "$STORE_LOCK_PATH"
+                echo "Error: could not initialize ticket-store lock" >&2
+                return 1
+            fi
+            STORE_LOCK_HELD=1
+            trap cleanup_store_state EXIT
+            trap 'exit 129' HUP
+            trap 'exit 130' INT
+            trap 'exit 143' TERM
+            return 0
+        fi
+
+        if [[ ! -e "$STORE_LOCK_PATH" && ! -L "$STORE_LOCK_PATH" ]]; then
+            continue
+        fi
+        if [[ ! -f "$STORE_LOCK_PATH" || -L "$STORE_LOCK_PATH" ]]; then
+            echo "Error: invalid ticket-store lock" >&2
+            return 1
+        fi
+
+        owner=$(<"$STORE_LOCK_PATH")
+        if [[ -n "$owner" ]] && ! lock_owner_is_alive "$owner"; then
+            reap_stale_store_lock "$owner"
+            [[ ! -e "$STORE_LOCK_PATH" ]] && continue
+        elif [[ -z "$owner" && $attempt -eq 20 ]]; then
+            reap_stale_store_lock "$owner"
+            [[ ! -e "$STORE_LOCK_PATH" ]] && continue
+        fi
+
+        [[ $attempt -ge 20 ]] && break
+        sleep 0.05
+    done
+
+    echo "Error: ticket store is busy; retry the command" >&2
+    return 1
+}
+
+new_store_temp() {
+    STORE_LAST_TEMP=$(mktemp "$TICKETS_DIR/.tk.tmp.XXXXXX") || return 1
+    chmod 600 "$STORE_LAST_TEMP"
+    STORE_TEMP_FILES+=("$STORE_LAST_TEMP")
+}
+
+prepare_rewrite_temp() {
+    local file="$1"
+    new_store_temp || return 1
+    if ! cat "$file" > "$STORE_LAST_TEMP"; then
+        rm -f "$STORE_LAST_TEMP"
+        return 1
+    fi
+}
+
+ticket_file_mode() {
+    local file="$1"
+    if stat -c %a "$file" >/dev/null 2>&1; then
+        stat -c %a "$file"
+    else
+        stat -f %Lp "$file"
+    fi
+}
+
+preserve_ticket_mode() {
+    local source="$1"
+    local target="$2"
+    chmod "$(ticket_file_mode "$source")" "$target"
+}
+
+set_new_ticket_mode() {
+    local file="$1"
+    local mask mode
+    mask=$(umask)
+    mode=$((0666 & ~0$mask))
+    printf -v mode '%03o' "$mode"
+    chmod "$mode" "$file"
 }
 
 load_ticket_files() {
@@ -103,6 +254,7 @@ load_ticket_files() {
     for file in "${candidates[@]}"; do
         [[ -f "$file" && ! -L "$file" ]] && TICKET_FILES+=("$file")
     done
+    return 0
 }
 
 validate_id_fragment() {
@@ -166,14 +318,16 @@ yaml_field() {
     ' "$file"
 }
 
-# Update YAML field in frontmatter only
+# Update a YAML field through an atomic, permission-preserving replacement.
 update_yaml_field() {
     local file="$1"
     local field="$2"
     local value="$3"
-    local tmp="${file}.tmp.$$"
+    local tmp
+    prepare_rewrite_temp "$file" || return 1
+    tmp="$STORE_LAST_TEMP"
 
-    awk -v field="$field" -v value="$value" '
+    if ! awk -v field="$field" -v value="$value" '
         NR == 1 && /^---$/ {
             in_front = 1
             print
@@ -191,7 +345,11 @@ update_yaml_field() {
             next
         }
         { print }
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
+    ' "$file" > "$tmp"; then
+        return 1
+    fi
+    preserve_ticket_mode "$file" "$tmp"
+    mv "$tmp" "$file"
 }
 
 array_contains() {
@@ -401,7 +559,7 @@ cmd_init() {
         esac
     done
 
-    ensure_dir
+    acquire_store_lock || return 1
     echo "Initialized $TICKETS_DIR"
 
     if [[ $tracked -eq 1 ]]; then
@@ -499,18 +657,19 @@ cmd_create() {
 
     validate_priority "$priority" || { print_usage create >&2; return 1; }
 
-    # Validate and resolve the parent before creating the ticket store.
+    if [[ -n "$parent" && ! -d "$TICKETS_DIR" ]]; then
+        echo "Error: ticket '$parent' not found" >&2
+        return 1
+    fi
+    acquire_store_lock || return 1
+
+    # Resolve the parent while the store is locked.
     if [[ -n "$parent" ]]; then
-        if [[ ! -d "$TICKETS_DIR" ]]; then
-            echo "Error: ticket '$parent' not found" >&2
-            return 1
-        fi
         local parent_file
         parent_file=$(ticket_path "$parent") || return 1
         parent=$(basename "$parent_file" .md)
     fi
 
-    ensure_dir
     title="${title:-Untitled}"
     local id file
     local attempts=0
@@ -526,8 +685,10 @@ cmd_create() {
         fi
     done
 
-    local now
+    local now tmp
     now=$(_iso_date)
+    new_store_temp || return 1
+    tmp="$STORE_LAST_TEMP"
 
     {
         printf '%s\n' '---'
@@ -539,9 +700,11 @@ cmd_create() {
         printf '%s\n' '---'
         printf '# %s\n\n' "$title"
         [[ -n "$description" ]] && printf '%s\n\n' "$description"
-    } > "$file"
+    } > "$tmp"
+    set_new_ticket_mode "$tmp"
+    mv "$tmp" "$file"
 
-    echo "$id"
+    printf '%s\n' "$id"
 }
 
 # Valid statuses
@@ -573,6 +736,7 @@ cmd_status() {
     local status="$2"
 
     validate_status "$status" || return 1
+    acquire_store_lock || return 1
 
     local file current_status resolved_id
     file=$(ticket_path "$id") || return 1
@@ -784,6 +948,8 @@ cmd_dep() {
 
     local id="$1"
     local dep_id="$2"
+    acquire_store_lock || return 1
+
     local file
     file=$(ticket_path "$id") || return 1
 
@@ -1246,6 +1412,7 @@ cmd_prune() {
         return 1
     fi
 
+    acquire_store_lock || return 1
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && {
         echo "No closed tickets to prune"
@@ -1315,6 +1482,8 @@ cmd_delete() {
         print_argument_error delete "Unknown option: $1"
         return 1
     fi
+
+    acquire_store_lock || return 1
 
     local file id refs
     file=$(ticket_path "$1") || return 1
@@ -1431,6 +1600,8 @@ cmd_undep() {
 
     local id="$1"
     local dep_id="$2"
+    acquire_store_lock || return 1
+
     local file
     file=$(ticket_path "$id") || return 1
 
@@ -1653,9 +1824,6 @@ cmd_add_note() {
         done
     fi
 
-    local file
-    file=$(ticket_path "$id") || return 1
-
     local note
     if [[ $# -gt 0 ]]; then
         note="$*"
@@ -1671,14 +1839,20 @@ cmd_add_note() {
         return 1
     fi
 
-    local timestamp
-    timestamp=$(_iso_date)
+    acquire_store_lock || return 1
 
-    # Add Notes section if missing, then append timestamped note
-    if ! grep -q '^## Notes' "$file"; then
-        printf '\n## Notes\n' >> "$file"
+    local file tmp timestamp
+    file=$(ticket_path "$id") || return 1
+    timestamp=$(_iso_date)
+    prepare_rewrite_temp "$file" || return 1
+    tmp="$STORE_LAST_TEMP"
+
+    if ! grep -q '^## Notes' "$tmp"; then
+        printf '\n## Notes\n' >> "$tmp"
     fi
-    printf '\n**%s**\n\n%s\n' "$timestamp" "$note" >> "$file"
+    printf '\n**%s**\n\n%s\n' "$timestamp" "$note" >> "$tmp"
+    preserve_ticket_mode "$file" "$tmp"
+    mv "$tmp" "$file"
 
     echo "Note added to $(basename "$file" .md)"
 }

@@ -74,6 +74,22 @@ file_mtime() {
     fi
 }
 
+file_mode() {
+    local file="$1"
+    if stat -c %a "$file" >/dev/null 2>&1; then
+        stat -c %a "$file"
+    else
+        stat -f %Lp "$file"
+    fi
+}
+
+process_token() {
+    local pid="$1" started
+    started=$(LC_ALL=C ps -p "$pid" -o lstart=)
+    read -r started <<< "$started"
+    printf '%s:%s\n' "$pid" "$started"
+}
+
 write_ticket_file() {
     local dir="$1"
     local id="$2"
@@ -674,6 +690,158 @@ test_commands_reject_unexpected_arguments() {
     rm -rf "$dir"
 }
 
+test_writer_lock_waits_and_recovers() {
+    local dir id holder
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Locked ticket"
+    assert_status 0
+    id="$LAST_OUTPUT"
+
+    (
+        process_token "$BASHPID" > "$dir/.tickets/.lock"
+        sleep 0.3
+        rm -f "$dir/.tickets/.lock"
+    ) &
+    holder=$!
+    while [[ ! -s "$dir/.tickets/.lock" ]]; do sleep 0.01; done
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 0
+    wait "$holder"
+
+    printf '%s\n' '99999999:stale process' > "$dir/.tickets/.lock"
+    run_in_dir "$dir" "$TK" reopen "$id"
+    assert_status 0
+    [[ ! -e "$dir/.tickets/.lock" ]] || fail "expected stale lock recovery"
+
+    : > "$dir/.tickets/.lock"
+    run_in_dir "$dir" "$TK" status "$id" open
+    assert_status 0
+    [[ ! -e "$dir/.tickets/.lock" ]] || fail "expected incomplete lock recovery"
+
+    printf '%s\n' '99999999:stale process' > "$dir/.tickets/.lock"
+    mkdir "$dir/.tickets/.lock.reaper"
+    run_in_dir "$dir" "$TK" status "$id" open
+    assert_status 1
+    assert_contains "ticket store is busy"
+    rmdir "$dir/.tickets/.lock.reaper"
+    run_in_dir "$dir" "$TK" status "$id" open
+    assert_status 0
+    [[ ! -e "$dir/.tickets/.lock" ]] || fail "expected stale lock recovery after removing orphaned reaper"
+
+    mkdir "$dir/.tickets/.lock"
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 1
+    assert_contains "invalid ticket-store lock"
+    rmdir "$dir/.tickets/.lock"
+
+    (
+        process_token "$BASHPID" > "$dir/.tickets/.lock"
+        sleep 5
+    ) &
+    holder=$!
+    while [[ ! -s "$dir/.tickets/.lock" ]]; do sleep 0.01; done
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 1
+    assert_contains "ticket store is busy"
+    kill "$holder" 2>/dev/null || true
+    wait "$holder" 2>/dev/null || true
+    rm -f "$dir/.tickets/.lock"
+
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "status: open"
+
+    rm -rf "$dir"
+}
+
+test_concurrent_writers_are_serialized() {
+    local dir task dep_one dep_two p1 p2 s1 s2
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Task"
+    assert_status 0
+    task="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" create "Dependency one"
+    assert_status 0
+    dep_one="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" create "Dependency two"
+    assert_status 0
+    dep_two="$LAST_OUTPUT"
+
+    (cd "$dir" && "$TK" dep "$task" "$dep_one" >dep-one.out 2>&1) & p1=$!
+    (cd "$dir" && "$TK" dep "$task" "$dep_two" >dep-two.out 2>&1) & p2=$!
+    if wait "$p1"; then s1=0; else s1=$?; fi
+    if wait "$p2"; then s2=0; else s2=$?; fi
+    [[ $s1 -eq 0 && $s2 -eq 0 ]] || fail "expected concurrent dependency updates to succeed"
+
+    run_in_dir "$dir" "$TK" show "$task"
+    assert_status 0
+    assert_contains "$dep_one"
+    assert_contains "$dep_two"
+
+    (cd "$dir" && "$TK" add-note "$task" "Concurrent note one" >note-one.out 2>&1) & p1=$!
+    (cd "$dir" && "$TK" add-note "$task" "Concurrent note two" >note-two.out 2>&1) & p2=$!
+    if wait "$p1"; then s1=0; else s1=$?; fi
+    if wait "$p2"; then s2=0; else s2=$?; fi
+    [[ $s1 -eq 0 && $s2 -eq 0 ]] || fail "expected concurrent notes to succeed"
+
+    run_in_dir "$dir" "$TK" show "$task"
+    assert_status 0
+    assert_contains "Concurrent note one"
+    assert_contains "Concurrent note two"
+
+    rm -rf "$dir"
+}
+
+test_atomic_updates_preserve_permissions() {
+    local dir task dep file
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Private ticket"
+    assert_status 0
+    task="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" create "Dependency"
+    assert_status 0
+    dep="$LAST_OUTPUT"
+    file="$dir/.tickets/$task.md"
+    chmod 600 "$file"
+
+    run_in_dir "$dir" "$TK" start "$task"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "600" ]] || fail "status update changed ticket permissions"
+    run_in_dir "$dir" "$TK" dep "$task" "$dep"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "600" ]] || fail "dependency update changed ticket permissions"
+    run_in_dir "$dir" "$TK" undep "$task" "$dep"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "600" ]] || fail "dependency removal changed ticket permissions"
+    run_in_dir "$dir" "$TK" add-note "$task" "Private note"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "600" ]] || fail "note update changed ticket permissions"
+
+    chmod 444 "$file"
+    run_in_dir "$dir" "$TK" close "$task"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "444" ]] || fail "read-only status update changed ticket permissions"
+    run_in_dir "$dir" "$TK" add-note "$task" "Read-only note"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "444" ]] || fail "read-only note update changed ticket permissions"
+
+    run_in_dir "$dir" bash -c 'umask 0777; "$1" add-note "$2" "Restrictive umask note"' _ "$TK" "$task"
+    assert_status 0
+    [[ "$(file_mode "$file")" == "444" ]] || fail "restrictive umask changed ticket permissions"
+
+    [[ ! -e "$dir/.tickets/.lock" && ! -L "$dir/.tickets/.lock" ]] || fail "writer lock was not cleaned up"
+    [[ ! -d "$dir/.tickets/.lock.reaper" ]] || fail "lock reaper was not cleaned up"
+    shopt -s nullglob
+    local temps=("$dir"/.tickets/.tk.tmp.*)
+    shopt -u nullglob
+    [[ ${#temps[@]} -eq 0 ]] || fail "temporary ticket files were not cleaned up"
+
+    rm -rf "$dir"
+}
+
 test_create_show_and_status_flow() {
     local dir id
     dir=$(new_workspace)
@@ -1005,6 +1173,9 @@ main() {
     run_test test_list_and_closed_option_parsing
     run_test test_closed_filters_before_applying_limit
     run_test test_commands_reject_unexpected_arguments
+    run_test test_writer_lock_waits_and_recovers
+    run_test test_concurrent_writers_are_serialized
+    run_test test_atomic_updates_preserve_permissions
     run_test test_create_show_and_status_flow
     run_test test_status_updates_are_true_noops
     run_test test_dep_and_undep_flow
