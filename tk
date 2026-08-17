@@ -85,7 +85,7 @@ _iso_date() {
 generate_id() {
     local hash
     hash=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6)
-    echo "$hash"
+    printf '%s\n' "$hash"
 }
 
 # Ensure tickets directory exists
@@ -95,36 +95,58 @@ ensure_dir() {
 
 load_ticket_files() {
     shopt -s nullglob
-    TICKET_FILES=("$TICKETS_DIR"/*.md)
+    local -a candidates=("$TICKETS_DIR"/*.md)
     shopt -u nullglob
+
+    TICKET_FILES=()
+    local file
+    for file in "${candidates[@]}"; do
+        [[ -f "$file" && ! -L "$file" ]] && TICKET_FILES+=("$file")
+    done
 }
 
-# Get ticket file path (supports partial ID matching)
+validate_id_fragment() {
+    local id="$1"
+    if [[ ! "$id" =~ ^[a-z0-9]{1,6}$ ]]; then
+        printf "Error: invalid ticket ID '%s'. Use 1-6 lowercase letters or digits\n" "$id" >&2
+        return 1
+    fi
+}
+
+# Get a direct ticket file path (supports literal partial ID matching).
 ticket_path() {
     local id="$1"
-    # Trim leading/trailing whitespace (handles Claude/agent quirks)
+    # Trim leading/trailing whitespace (handles agent-generated whitespace).
     read -r id <<< "$id"
-    local exact="$TICKETS_DIR/${id}.md"
+    validate_id_fragment "$id" || return 1
 
+    local exact="$TICKETS_DIR/${id}.md"
+    if [[ -L "$exact" ]]; then
+        printf "Error: ticket '%s' is a symbolic link\n" "$id" >&2
+        return 1
+    fi
     if [[ -f "$exact" ]]; then
-        echo "$exact"
+        printf '%s\n' "$exact"
         return 0
     fi
 
-    # Try partial match (anywhere in filename)
-    local matches
-    matches=$(find "$TICKETS_DIR" -maxdepth 1 -name "*${id}*.md" | head -2)
-    local count
-    count=$(echo "$matches" | _grep -c . || true)
+    local file candidate
+    local -a matches=()
+    load_ticket_files
+    for file in "${TICKET_FILES[@]}"; do
+        [[ -f "$file" && ! -L "$file" ]] || continue
+        candidate=$(basename "$file" .md)
+        [[ "$candidate" == *"$id"* ]] && matches+=("$file")
+        [[ ${#matches[@]} -gt 1 ]] && break
+    done
 
-    if [[ "$count" -eq 1 ]]; then
-        echo "$matches"
-        return 0
-    elif [[ "$count" -gt 1 ]]; then
-        echo "Error: ambiguous ID '$id' matches multiple tickets" >&2
+    if [[ ${#matches[@]} -eq 1 ]]; then
+        printf '%s\n' "${matches[0]}"
+    elif [[ ${#matches[@]} -gt 1 ]]; then
+        printf "Error: ambiguous ID '%s' matches multiple tickets\n" "$id" >&2
         return 1
     else
-        echo "Error: ticket '$id' not found" >&2
+        printf "Error: ticket '%s' not found\n" "$id" >&2
         return 1
     fi
 }
@@ -449,6 +471,16 @@ cmd_create() {
                 parent="$2"
                 shift 2
                 ;;
+            --)
+                shift
+                if [[ $title_set -eq 1 || $# -ne 1 ]]; then
+                    print_argument_error create "Expected one title after --"
+                    return 1
+                fi
+                title="$1"
+                title_set=1
+                shift
+                ;;
             -*)
                 print_argument_error create "Unknown option: $1"
                 return 1
@@ -485,7 +517,7 @@ cmd_create() {
     while true; do
         id=$(generate_id)
         file="$TICKETS_DIR/${id}.md"
-        [[ ! -e "$file" ]] && break
+        [[ ! -e "$file" && ! -L "$file" ]] && break
 
         attempts=$((attempts + 1))
         if [[ $attempts -ge 100 ]]; then
@@ -498,20 +530,15 @@ cmd_create() {
     now=$(_iso_date)
 
     {
-        echo "---"
-        echo "id: $id"
-        echo "status: open"
-        echo "deps: []"
-        echo "created: $now"
-        echo "priority: $priority"
-        [[ -n "$parent" ]] && echo "parent: $parent"
-        echo "---"
-        echo "# $title"
-        echo ""
-        if [[ -n "$description" ]]; then
-            echo "$description"
-            echo ""
-        fi
+        printf '%s\n' '---'
+        printf 'id: %s\n' "$id"
+        printf '%s\n' 'status: open' 'deps: []'
+        printf 'created: %s\n' "$now"
+        printf 'priority: %s\n' "$priority"
+        [[ -n "$parent" ]] && printf 'parent: %s\n' "$parent"
+        printf '%s\n' '---'
+        printf '# %s\n\n' "$title"
+        [[ -n "$description" ]] && printf '%s\n\n' "$description"
     } > "$file"
 
     echo "$id"
@@ -1155,10 +1182,19 @@ cmd_closed() {
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
-    local -a files=()
-    mapfile -t files < <(ls -t -- "${TICKET_FILES[@]}" | head -n 100)
-    [[ ${#files[@]} -eq 0 ]] && return 0
-    awk '
+    local file status sorted
+    local -a closed_files=() files=()
+    for file in "${TICKET_FILES[@]}"; do
+        [[ -f "$file" && ! -L "$file" ]] || continue
+        status=$(yaml_field "$file" "status")
+        [[ "$status" == "closed" ]] && closed_files+=("$file")
+    done
+    [[ ${#closed_files[@]} -eq 0 ]] && return 0
+
+    sorted=$(ls -t -- "${closed_files[@]}") || return 1
+    mapfile -t files <<< "$sorted"
+
+    awk -v limit="$limit" '
     BEGIN { FS=": "; in_front=0 }
     FNR==1 {
         if (prev_file) emit()
@@ -1171,15 +1207,13 @@ cmd_closed() {
     in_front && /^status:/ { status = $2 }
     !in_front && /^# / && title == "" { title = substr($0, 3) }
     function emit() {
-        if (id != "" && status == "closed") {
-            output[++count] = sprintf("%-8s [%s] - %s", id, status, title)
+        if (id != "" && status == "closed" && count < limit) {
+            printf "%-8s [%s] - %s\n", id, status, title
+            count++
         }
     }
-    END {
-        if (prev_file) emit()
-        for (i = 1; i <= count; i++) print output[i]
-    }
-    ' "${files[@]}" | head -n "$limit"
+    END { if (prev_file) emit() }
+    ' "${files[@]}"
 }
 
 ticket_outgoing_refs() {
@@ -1269,6 +1303,7 @@ cmd_prune() {
 
     [[ $count -gt 0 ]] && echo "Pruned $count ticket(s)"
     [[ $retained -gt 0 ]] && echo "Retained $retained closed ticket(s) still reachable from non-closed tickets"
+    return 0
 }
 
 cmd_delete() {
@@ -1399,13 +1434,41 @@ cmd_undep() {
     local file
     file=$(ticket_path "$id") || return 1
 
-    # Resolve dep_id to full ID
-    local dep_file
-    dep_file=$(ticket_path "$dep_id") || return 1
-    dep_id=$(basename "$dep_file" .md)
-
-    local current_deps
+    local current_deps dep_file candidate
     current_deps=$(yaml_field "$file" "deps")
+    read -r dep_id <<< "$dep_id"
+    validate_id_fragment "$dep_id" || return 1
+
+    local raw_deps match_count=0 matched_id=""
+    raw_deps="${current_deps#[}"
+    raw_deps="${raw_deps%]}"
+    raw_deps="${raw_deps// /}"
+    local -a dep_ids=()
+    [[ -n "$raw_deps" ]] && IFS=',' read -r -a dep_ids <<< "$raw_deps"
+
+    if array_contains "$current_deps" "$dep_id"; then
+        matched_id="$dep_id"
+        match_count=1
+    else
+        for candidate in "${dep_ids[@]}"; do
+            if [[ "$candidate" == *"$dep_id"* ]]; then
+                matched_id="$candidate"
+                ((match_count += 1))
+            fi
+        done
+    fi
+
+    if [[ $match_count -gt 1 ]]; then
+        printf "Error: ambiguous ID '%s' matches multiple stored dependencies\n" "$dep_id" >&2
+        return 1
+    elif [[ $match_count -eq 1 ]]; then
+        dep_id="$matched_id"
+    elif dep_file=$(ticket_path "$dep_id" 2>/dev/null); then
+        dep_id=$(basename "$dep_file" .md)
+    else
+        echo "Dependency not found"
+        return 0
+    fi
 
     if ! array_contains "$current_deps" "$dep_id"; then
         echo "Dependency not found"
@@ -1603,6 +1666,11 @@ cmd_add_note() {
         return 1
     fi
 
+    if [[ -z "$note" ]]; then
+        echo "Error: no note provided" >&2
+        return 1
+    fi
+
     local timestamp
     timestamp=$(_iso_date)
 
@@ -1708,10 +1776,12 @@ Options:
                              Use --description=<text> when text starts with '-'
   -p, --priority <0-4>      Priority, 0=highest [default: 2]
   --parent <id>             Parent ticket ID
+  --                        End options (for titles starting with '-')
 
 Examples:
   $cmd create "Ship release notes"
   $cmd create "Draft changelog" --parent abc123 -p 1
+  $cmd create -- "- follow-up"
 EOF
             ;;
         start|close|reopen)
@@ -1916,7 +1986,12 @@ EOF
 # Resolve help before ticket store initialization.
 if [[ "${1:-}" == "help" ]]; then
     shift
-    cmd_help "$@"
+    help_args=()
+    for arg in "$@"; do
+        [[ "$arg" == "--help" || "$arg" == "-h" ]] && continue
+        help_args+=("$arg")
+    done
+    cmd_help "${help_args[@]}"
     exit $?
 fi
 
@@ -1929,7 +2004,17 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 
-# A help flag anywhere after a command takes precedence over validation and work.
+# Reject unknown commands before help dispatch or ticket-store discovery.
+case "${1:-}" in
+    ""|init|create|start|close|reopen|status|dep|undep|ls|list|tree|ready|blocked|done|closed|prune|delete|show|add-note) ;;
+    *)
+        printf 'Unknown command: %s\n' "$1" >&2
+        cmd_help >&2
+        exit 1
+        ;;
+esac
+
+# A help flag anywhere after a known command takes precedence over work.
 help_requested=0
 for arg in "${@:2}"; do
     [[ "$arg" == "--" ]] && break
@@ -1977,7 +2062,7 @@ case "${1:-help}" in
     help) shift; cmd_help "$@" ;;
     --help|-h) cmd_help ;;
     *)
-        echo "Unknown command: $1" >&2
+        printf 'Unknown command: %s\n' "$1" >&2
         cmd_help >&2
         exit 1
         ;;

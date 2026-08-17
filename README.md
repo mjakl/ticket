@@ -29,6 +29,7 @@ Commands:
     -d, --description      Description text, or '-' to read from stdin
     -p, --priority         Priority 0-4, 0=highest [default: 2]
     --parent               Parent ticket ID
+    --                     End options (for titles starting with '-')
   start <id>               Set status to in_progress
   close <id>               Set status to closed
   reopen <id>              Set status to open
@@ -57,7 +58,7 @@ Examples:
   tk dep publish-id changelog-id   # publish is blocked by changelog
 ```
 
-For longer descriptions or notes, use stdin to avoid shell quoting issues:
+For longer descriptions or notes, use stdin to avoid shell quoting issues. Use `--description=<text>` for a description beginning with `-`, and `tk create -- "- title"` or `tk add-note <id> -- "- note"` for a title or note beginning with `-`:
 
 ```bash
 tk create "Investigate modal behavior" -d - <<'EOF'
@@ -88,12 +89,12 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 - Set `TICKETS_DIR` to use a different ticket directory
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
 - Queue-summary commands such as `list`, `ready`, `blocked`, `tree`, `closed`, and `done` behave like an empty queue when no ticket store exists
-- Supports partial ID matching (e.g. `tk show 1a2` matches `1a2b3c`)
+- Supports literal partial ID matching using 1-6 lowercase letters or digits (e.g. `tk show 1a2` matches `1a2b3c`)
 - `dep tree` marks repeated dependencies as `(shared)` unless you use `--full`
 - `done` is useful in automation: it exits `0` when every ticket is `closed`, and `1` while any ticket remains `open` or `in_progress`
 - `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
-- `undep` is idempotent when the dependency is already absent
+- `undep` is idempotent when the dependency is already absent and can remove a stored dependency after its target file is gone
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## Upstream

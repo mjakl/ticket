@@ -11,6 +11,12 @@
 - `list --status X` and `closed --limit N` space-separated option values are now accepted
 
 ### Fixed
+- Ticket lookup now accepts only literal alphanumeric ID fragments and cannot traverse outside the store or follow ticket symlinks
+- `closed` now filters all closed tickets before sorting and applying `--limit`, without a hidden 100-file ceiling
+- `prune` now exits successfully after pruning all eligible tickets
+- `undep` can repair dangling stored dependencies after their target file is gone
+- User-provided titles and descriptions are written literally, including leading dashes and backslashes
+- Unknown commands are reported before ticket-store discovery, help flags compose consistently, and empty notes are rejected
 - Commands now reject unexpected arguments and unknown options before changing ticket state
 - Repeated status changes are true no-ops and preserve ticket modification times
 - `list` and `closed` now reject unknown options instead of silently ignoring them

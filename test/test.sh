@@ -275,6 +275,36 @@ EOF
     rm -rf "$dir"
 }
 
+test_create_does_not_follow_dangling_symlink() {
+    local dir fake_bin state_file
+    dir=$(new_workspace)
+    fake_bin="$dir/fake-bin"
+    state_file="$dir/tr-state"
+    mkdir -p "$dir/.tickets" "$fake_bin"
+    ln -s ../outside-created.md "$dir/.tickets/abc123.md"
+
+    cat > "$fake_bin/tr" <<EOF
+#!/usr/bin/env bash
+state_file="$state_file"
+if [[ ! -f "\$state_file" ]]; then
+    echo 1 > "\$state_file"
+    printf 'abc123'
+else
+    printf 'def456'
+fi
+EOF
+    chmod +x "$fake_bin/tr"
+
+    run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" create "Safe collision"
+    assert_status 0
+    assert_equals "def456"
+    [[ ! -e "$dir/outside-created.md" ]] || fail "create followed a dangling symlink"
+    [[ -L "$dir/.tickets/abc123.md" ]] || fail "expected dangling symlink to remain"
+    [[ -f "$dir/.tickets/def456.md" ]] || fail "expected create to retry with a safe ID"
+
+    rm -rf "$dir"
+}
+
 test_parser_errors_are_not_suppressed() {
     local dir fake_bin
     dir=$(new_workspace)
@@ -313,6 +343,10 @@ test_subcommand_help_does_not_need_ticket_store() {
     assert_contains "Usage: tk create [title] [options]"
     assert_not_contains "closed [--limit N]"
 
+    run_in_dir "$dir" "$TK" help create --help
+    assert_status 0
+    assert_contains "Usage: tk create [title] [options]"
+
     run_in_dir "$dir" "$TK" create "Ignored title" --help
     assert_status 0
     assert_contains "Usage: tk create [title] [options]"
@@ -341,6 +375,16 @@ test_subcommand_help_does_not_need_ticket_store() {
     run_in_dir "$dir" "$TK" help dep-tree
     assert_status 1
     assert_contains "Unknown help topic: dep-tree"
+
+    run_in_dir "$dir" "$TK" unknown-command
+    assert_status 1
+    assert_contains "Unknown command: unknown-command"
+    assert_not_contains "no .tickets directory found"
+
+    run_in_dir "$dir" "$TK" unknown-command --help
+    assert_status 1
+    assert_contains "Unknown command: unknown-command"
+    assert_not_contains "Unknown help topic"
 
     rm -rf "$dir"
 }
@@ -412,12 +456,19 @@ test_create_reads_description_from_stdin() {
     assert_contains '`literal selector`'
     assert_contains '$VALUE stays literal'
 
-    run_in_dir "$dir" "$TK" create "Dash description" "--description=-starts with dash"
+    run_in_dir "$dir" "$TK" create "Dash description" "--description=-n"
     assert_status 0
     id="$LAST_OUTPUT"
     run_in_dir "$dir" "$TK" show "$id"
     assert_status 0
-    assert_contains "-starts with dash"
+    grep -Fx -- '-n' "$dir/.tickets/$id.md" >/dev/null || fail "expected literal -n description"
+
+    run_in_dir "$dir" "$TK" create -- "-n"
+    assert_status 0
+    id="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" show "$id"
+    assert_status 0
+    assert_contains "# -n"
 
     rm -rf "$dir"
 }
@@ -470,6 +521,40 @@ test_list_and_closed_option_parsing() {
     run_in_dir "$dir" "$TK" closed --all
     assert_status 1
     assert_contains "Unknown option: --all"
+
+    rm -rf "$dir"
+}
+
+test_closed_filters_before_applying_limit() {
+    local dir id line_count
+    dir=$(new_workspace)
+
+    write_ticket_file "$dir" old001 closed "Old closed ticket"
+    touch -t 202001010000 "$dir/.tickets/old001.md"
+
+    for i in $(seq 1 101); do
+        printf -v id 'o%05d' "$i"
+        write_ticket_file "$dir" "$id" open "Open $i"
+    done
+
+    run_in_dir "$dir" "$TK" closed
+    assert_status 0
+    assert_contains "old001"
+
+    for i in $(seq 1 105); do
+        printf -v id 'c%05d' "$i"
+        write_ticket_file "$dir" "$id" closed "Closed $i"
+    done
+
+    run_in_dir "$dir" "$TK" closed --limit 150
+    assert_status 0
+    line_count=$(printf '%s\n' "$LAST_OUTPUT" | sed '/^$/d' | wc -l)
+    [[ "$line_count" -eq 106 ]] || fail "expected all 106 closed tickets, got $line_count"
+
+    run_in_dir "$dir" "$TK" closed --limit 2
+    assert_status 0
+    line_count=$(printf '%s\n' "$LAST_OUTPUT" | sed '/^$/d' | wc -l)
+    [[ "$line_count" -eq 2 ]] || fail "expected closed limit to apply after filtering"
 
     rm -rf "$dir"
 }
@@ -559,6 +644,16 @@ test_commands_reject_unexpected_arguments() {
     assert_contains "Usage: tk show <id>"
 
     cp "$dir/.tickets/$id.md" "$dir/ticket-before-option.md"
+    run_in_dir "$dir" "$TK" add-note "$id" ""
+    assert_status 1
+    assert_contains "Error: no note provided"
+    cmp -s "$dir/.tickets/$id.md" "$dir/ticket-before-option.md" || fail "empty note should not change the ticket"
+
+    run_in_dir "$dir" bash -c ': | "$1" add-note "$2"' _ "$TK" "$id"
+    assert_status 1
+    assert_contains "Error: no note provided"
+    cmp -s "$dir/.tickets/$id.md" "$dir/ticket-before-option.md" || fail "empty stdin note should not change the ticket"
+
     run_in_dir "$dir" "$TK" add-note "$id" --bogus
     assert_status 1
     assert_contains "Unknown option: --bogus"
@@ -689,6 +784,28 @@ test_dep_and_undep_flow() {
     rm -rf "$dir"
 }
 
+test_undep_repairs_dangling_dependency() {
+    local dir
+    dir=$(new_workspace)
+
+    write_ticket_file "$dir" task01 open "Task" "[abc111]"
+    write_ticket_file "$dir" abc222 open "Unrelated live ticket"
+
+    run_in_dir "$dir" "$TK" undep task01 abc
+    assert_status 0
+    assert_contains "Removed dependency: task01 -/-> abc111"
+    run_in_dir "$dir" "$TK" show task01
+    assert_status 0
+    assert_contains "deps: []"
+
+    write_ticket_file "$dir" task01 open "Task" "[abc111, abc333]"
+    run_in_dir "$dir" "$TK" undep task01 abc
+    assert_status 1
+    assert_contains "matches multiple stored dependencies"
+
+    rm -rf "$dir"
+}
+
 test_partial_id_resolution_and_ambiguity() {
     local dir
     dir=$(new_workspace)
@@ -701,9 +818,49 @@ test_partial_id_resolution_and_ambiguity() {
     assert_status 0
     assert_contains "# Delta"
 
+    run_in_dir "$dir" "$TK" show abc111
+    assert_status 0
+    assert_contains "# Alpha one"
+
     run_in_dir "$dir" "$TK" show abc
     assert_status 1
     assert_contains "Error: ambiguous ID 'abc' matches multiple tickets"
+
+    rm -rf "$dir"
+}
+
+test_ticket_lookup_stays_inside_store() {
+    local dir id
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Safe ticket"
+    assert_status 0
+    id="$LAST_OUTPUT"
+    printf '%s\n' "outside" > "$dir/victim.md"
+    cp "$dir/victim.md" "$dir/victim.before"
+
+    local invalid
+    for invalid in '../victim' '*' '?' '[' 'abc/def' ''; do
+        run_in_dir "$dir" "$TK" delete "$invalid"
+        assert_status 1
+        assert_contains "invalid ticket ID"
+    done
+    [[ -f "$dir/victim.md" ]] || fail "ticket lookup escaped the store"
+    cmp -s "$dir/victim.md" "$dir/victim.before" || fail "outside file changed"
+    [[ -f "$dir/.tickets/$id.md" ]] || fail "invalid lookup deleted a real ticket"
+
+    ln -s ../victim.md "$dir/.tickets/link01.md"
+    run_in_dir "$dir" "$TK" list
+    assert_status 0
+    assert_not_contains "link01"
+    run_in_dir "$dir" "$TK" show link01
+    assert_status 1
+    assert_contains "is a symbolic link"
+    run_in_dir "$dir" "$TK" add-note link01 "unsafe"
+    assert_status 1
+    assert_contains "is a symbolic link"
+    assert_equals "Error: ticket 'link01' is a symbolic link"
+    cmp -s "$dir/victim.md" "$dir/victim.before" || fail "symlink target changed"
 
     rm -rf "$dir"
 }
@@ -767,6 +924,23 @@ test_prune_keeps_reachable_closed_tickets() {
     rm -rf "$dir"
 }
 
+test_prune_all_closed_returns_success() {
+    local dir id
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "Prune me"
+    assert_status 0
+    id="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" close "$id"
+    assert_status 0
+    run_in_dir "$dir" "$TK" prune
+    assert_status 0
+    assert_contains "Pruned 1 ticket(s)"
+    [[ ! -f "$dir/.tickets/$id.md" ]] || fail "expected closed ticket to be pruned"
+
+    rm -rf "$dir"
+}
+
 test_done_reports_completion_via_exit_status() {
     local dir open_id progress_id
     dir=$(new_workspace)
@@ -822,19 +996,24 @@ main() {
     run_test test_create_reports_missing_option_values
     run_test test_create_validates_priority_range
     run_test test_create_retries_on_id_collision
+    run_test test_create_does_not_follow_dangling_symlink
     run_test test_parser_errors_are_not_suppressed
     run_test test_subcommand_help_does_not_need_ticket_store
     run_test test_init_creates_store_and_gitignore
     run_test test_read_commands_allow_missing_store
     run_test test_create_reads_description_from_stdin
     run_test test_list_and_closed_option_parsing
+    run_test test_closed_filters_before_applying_limit
     run_test test_commands_reject_unexpected_arguments
     run_test test_create_show_and_status_flow
     run_test test_status_updates_are_true_noops
     run_test test_dep_and_undep_flow
+    run_test test_undep_repairs_dangling_dependency
     run_test test_partial_id_resolution_and_ambiguity
+    run_test test_ticket_lookup_stays_inside_store
     run_test test_delete_refuses_referenced_tickets
     run_test test_prune_keeps_reachable_closed_tickets
+    run_test test_prune_all_closed_returns_success
     run_test test_done_reports_completion_via_exit_status
     echo
     echo "Passed: $PASS_COUNT"
