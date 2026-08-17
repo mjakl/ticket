@@ -10,7 +10,14 @@
 - Queue-summary commands such as `list`, `ready`, `blocked`, `tree`, `closed`, and `done` now behave like an empty queue when no ticket store exists
 - `list --status X` and `closed --limit N` space-separated option values are now accepted
 
+### Changed
+- Bash 4 or newer is now required explicitly; startup fails with a clear diagnostic on older Bash versions
+- `dep` now rejects direct and transitive dependency cycles
+
 ### Fixed
+- Mutating commands now validate ticket structure, canonical IDs, references, and existing cycles before changing state, while `undep` can still repair dangling dependencies or cycles
+- New and rewritten ticket content is validated before atomic publication, including clear rejection of CRLF content
+- Destructive commands validate the complete store before deleting any ticket
 - Mutating commands now serialize through a portable store lock, briefly wait on contention, and recover locks owned by dead processes
 - Ticket creation, frontmatter updates, and notes now use atomic same-directory replacement with permission preservation and temporary cleanup
 - Random ID generation now handles the expected pipeline SIGPIPE without intermittent create failures

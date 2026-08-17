@@ -8,7 +8,7 @@
 
 Installation is just putting `tk` somewhere on your `PATH`.
 
-`tk` requires `bash`, so Linux, macOS, and Windows with WSL should be fine.
+`tk` requires Bash 4 or newer. Linux and Windows with WSL normally provide a suitable Bash. macOS ships an older Bash, so install a current Bash (for example with Homebrew) and ensure it appears first on `PATH`.
 
 Add something like this to your AGENTS.md:
 
@@ -48,7 +48,7 @@ Commands:
   show <id>                Display ticket
   add-note <id> [text]     Append timestamped note (or pipe via stdin)
 
-Create work with 'tk create "Title"' and optionally group it under a larger task with '--parent <id>' to model a subtask. Use 'tk dep <id> <dep-id>' when one ticket is blocked by another ticket and cannot be completed first. In other words, A -> B means ticket A depends on B. Use parent/child links to describe breakdown of work, and dependency links to describe execution order or blocking relationships.
+Create work with 'tk create "Title"' and optionally group it under a larger task with '--parent <id>' to model a subtask. Use 'tk dep <id> <dep-id>' when one ticket is blocked by another ticket and cannot be completed first. In other words, A -> B means ticket A depends on B. Use parent/child links to describe breakdown of work, and dependency links to describe execution order or blocking relationships. Dependencies that would introduce a direct or transitive cycle are rejected.
 
 Examples:
   tk init
@@ -84,7 +84,8 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 
 ## Notes
 
-- Tickets are stored as Markdown files in `.tickets/`
+- Tickets are stored as LF-terminated Markdown files in `.tickets/`
+- Before mutation, `tk` validates required frontmatter fields, canonical six-character IDs, filename/ID agreement, statuses, priorities, references, and dependency cycles; malformed stores fail without being changed, while `undep` remains available to repair dangling dependencies or cycles
 - `tk init` creates `.tickets/` and adds `.tickets/` to `.gitignore`; use `tk init --tracked` if you want tickets committed
 - Set `TICKETS_DIR` to use a different ticket directory
 - The script walks parent directories to find `.tickets/` when `TICKETS_DIR` is not set
@@ -95,8 +96,8 @@ The tests use temporary workspaces and exercise the CLI end-to-end, including ti
 - `prune` removes closed-only dependency/parent chains in one pass, but still retains closed tickets that are reachable from non-closed tickets
 - `delete` refuses to remove tickets that are still referenced via `deps` or `parent`
 - `undep` is idempotent when the dependency is already absent and can remove a stored dependency after its target file is gone
-- Mutating commands use a store-wide writer lock, wait briefly for another writer, and fail clearly if the store remains busy
-- Ticket creation, updates, and notes are published atomically; rewrites preserve ticket permissions
+- Mutating commands use a store-wide writer lock, wait briefly for another writer, recover locks from dead owners, and fail clearly if the store remains busy; after an interrupted stale-lock recovery, remove `.tickets/.lock.reaper` only after confirming no writer is active
+- Ticket creation, updates, and notes are validated and published atomically; rewrites preserve ticket permissions
 - `show` uses `TICKET_PAGER` first, then `PAGER`, when stdout is a TTY
 
 ## Upstream

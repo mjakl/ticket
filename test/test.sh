@@ -5,7 +5,6 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TK="$ROOT_DIR/tk"
 
 PASS_COUNT=0
-FAIL_COUNT=0
 LAST_STATUS=0
 LAST_OUTPUT=""
 
@@ -312,23 +311,24 @@ EOF
     chmod +x "$fake_bin/tr"
 
     run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" create "Safe collision"
-    assert_status 0
-    assert_equals "def456"
+    assert_status 1
+    assert_contains "expected a regular file"
     [[ ! -e "$dir/outside-created.md" ]] || fail "create followed a dangling symlink"
     [[ -L "$dir/.tickets/abc123.md" ]] || fail "expected dangling symlink to remain"
-    [[ -f "$dir/.tickets/def456.md" ]] || fail "expected create to retry with a safe ID"
+    [[ ! -f "$dir/.tickets/def456.md" ]] || fail "create published into an invalid store"
 
     rm -rf "$dir"
 }
 
 test_parser_errors_are_not_suppressed() {
-    local dir fake_bin
+    local dir fake_bin id count
     dir=$(new_workspace)
     fake_bin="$dir/fake-bin"
     mkdir -p "$fake_bin"
 
     run_in_dir "$dir" "$TK" create "Visible error"
     assert_status 0
+    id="$LAST_OUTPUT"
 
     cat > "$fake_bin/awk" <<'EOF'
 #!/usr/bin/env bash
@@ -340,6 +340,12 @@ EOF
     run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" ls
     assert_status 23
     assert_contains "awk exploded"
+
+    run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" create "Must not publish" --parent "$id"
+    assert_status 1
+    assert_contains "awk exploded"
+    count=$(find "$dir/.tickets" -maxdepth 1 -name '*.md' | wc -l)
+    [[ "$count" -eq 1 ]] || fail "parser failure published a ticket"
 
     rm -rf "$dir"
 }
@@ -1026,8 +1032,7 @@ test_ticket_lookup_stays_inside_store() {
     assert_contains "is a symbolic link"
     run_in_dir "$dir" "$TK" add-note link01 "unsafe"
     assert_status 1
-    assert_contains "is a symbolic link"
-    assert_equals "Error: ticket 'link01' is a symbolic link"
+    assert_contains "invalid ticket 'link01': expected a regular file"
     cmp -s "$dir/victim.md" "$dir/victim.before" || fail "symlink target changed"
 
     rm -rf "$dir"
@@ -1109,6 +1114,304 @@ test_prune_all_closed_returns_success() {
     rm -rf "$dir"
 }
 
+test_prune_stops_on_late_parser_failure() {
+    local dir fake_bin real_awk counter
+    dir=$(new_workspace)
+    fake_bin="$dir/fake-bin"
+    counter="$dir/dep-reads"
+    real_awk=$(command -v awk)
+    mkdir -p "$fake_bin"
+
+    write_ticket_file "$dir" act001 open "Active" "[cls001]"
+    write_ticket_file "$dir" cls001 closed "Closed dependency"
+
+    cat > "$fake_bin/awk" <<EOF
+#!/usr/bin/env bash
+real_awk="$real_awk"
+counter="$counter"
+active_file="$dir/.tickets/act001.md"
+if [[ "\$*" == *"field=deps"* && "\${!#}" == "\$active_file" ]]; then
+    count=0
+    [[ -f "\$counter" ]] && count=\$(<"\$counter")
+    count=\$((count + 1))
+    printf '%s\n' "\$count" > "\$counter"
+    if [[ \$count -ge 3 ]]; then
+        echo "late awk failure" >&2
+        exit 23
+    fi
+fi
+exec "\$real_awk" "\$@"
+EOF
+    chmod +x "$fake_bin/awk"
+
+    run_in_dir "$dir" env PATH="$fake_bin:$PATH" "$TK" prune
+    assert_status 1
+    assert_contains "late awk failure"
+    [[ -f "$dir/.tickets/cls001.md" ]] || fail "prune deleted a reachable ticket after parser failure"
+
+    rm -rf "$dir"
+}
+
+test_invalid_ticket_validation_blocks_mutations() {
+    local dir file
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "CR input" $'--description=bad\rtext'
+    assert_status 1
+    assert_contains "CRLF line endings are not supported"
+    shopt -s nullglob
+    local created_files=("$dir"/.tickets/*.md)
+    shopt -u nullglob
+    [[ ${#created_files[@]} -eq 0 ]] || fail "invalid create input published a ticket"
+
+    mkdir -p "$dir/.tickets"
+    file="$dir/.tickets/abc123.md"
+
+    cat > "$file" <<'EOF'
+---
+id: abc123
+status: open
+deps: []
+created: 2026-03-20T00:00:00Z
+priority: 2
+# Missing closing delimiter
+EOF
+    cp "$file" "$dir/before.md"
+    run_in_dir "$dir" "$TK" status abc123 closed
+    assert_status 1
+    assert_contains "missing closing frontmatter delimiter"
+    cmp -s "$file" "$dir/before.md" || fail "malformed ticket changed"
+
+    cat > "$file" <<'EOF'
+---
+id: abc123
+status: open
+status: closed
+deps: []
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Duplicate status
+EOF
+    cp "$file" "$dir/before.md"
+    run_in_dir "$dir" "$TK" add-note abc123 "Must fail"
+    assert_status 1
+    assert_contains "duplicate status field"
+    cmp -s "$file" "$dir/before.md" || fail "duplicate-field ticket changed"
+
+    cat > "$file" <<'EOF'
+---
+id: abc123
+status: strange
+deps: []
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Invalid status
+EOF
+    run_in_dir "$dir" "$TK" delete abc123
+    assert_status 1
+    assert_contains "invalid status strange"
+    [[ -f "$file" ]] || fail "invalid ticket was deleted"
+
+    cat > "$file" <<'EOF'
+---
+id: abc123
+status: open
+deps: [bad]
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Invalid dependency
+EOF
+    run_in_dir "$dir" "$TK" status abc123 closed
+    assert_status 1
+    assert_contains "dependency ids must be 6 lowercase letters or digits"
+
+    cat > "$file" <<'EOF'
+---
+id: abc123
+status: open
+deps: [abc 123]
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Embedded dependency space
+EOF
+    run_in_dir "$dir" "$TK" status abc123 closed
+    assert_status 1
+    assert_contains "dependency ids must be 6 lowercase letters or digits"
+
+    printf '%s\r\n' '---' 'id: abc123' 'status: open' 'deps: []' 'created: 2026-03-20T00:00:00Z' 'priority: 2' '---' '# CRLF' > "$file"
+    cp "$file" "$dir/before.md"
+    run_in_dir "$dir" "$TK" status abc123 closed
+    assert_status 1
+    assert_contains "CRLF line endings are not supported"
+    cmp -s "$file" "$dir/before.md" || fail "CRLF ticket changed"
+
+    write_ticket_file "$dir" def456 open "Mismatched ID"
+    mv "$dir/.tickets/def456.md" "$file"
+    run_in_dir "$dir" "$TK" status abc123 closed
+    assert_status 1
+    assert_contains "filename does not match frontmatter id def456"
+
+    write_ticket_file "$dir" abc123 open "Valid again"
+    cp "$file" "$dir/before.md"
+    run_in_dir "$dir" "$TK" add-note abc123 $'bad\rnote'
+    assert_status 1
+    assert_contains "CRLF line endings are not supported"
+    cmp -s "$file" "$dir/before.md" || fail "invalid note input changed the ticket"
+
+    [[ ! -e "$dir/.tickets/.lock" ]] || fail "validation failure left the store locked"
+    rm -rf "$dir"
+}
+
+test_destructive_commands_fail_closed_on_invalid_store() {
+    local dir
+    dir=$(new_workspace)
+
+    write_ticket_file "$dir" keep01 closed "Keep me"
+    cat > "$dir/.tickets/bad001.md" <<'EOF'
+---
+id: bad001
+status: open
+deps: []
+created: 2026-03-20T00:00:00Z
+---
+# Missing priority
+EOF
+
+    run_in_dir "$dir" "$TK" prune
+    assert_status 1
+    assert_contains "missing priority field"
+    [[ -f "$dir/.tickets/keep01.md" ]] || fail "prune deleted before validating the store"
+
+    run_in_dir "$dir" "$TK" delete keep01
+    assert_status 1
+    assert_contains "missing priority field"
+    [[ -f "$dir/.tickets/keep01.md" ]] || fail "delete ignored invalid store state"
+
+    rm "$dir/.tickets/bad001.md"
+
+    cat > "$dir/.tickets/.bad.md" <<'EOF'
+not a ticket
+EOF
+    run_in_dir "$dir" "$TK" prune
+    assert_status 1
+    assert_contains "invalid ticket '.bad'"
+    [[ -f "$dir/.tickets/keep01.md" ]] || fail "prune ignored a hidden Markdown entry"
+    rm "$dir/.tickets/.bad.md"
+
+    printf '%s\n' 'external' > "$dir/external.md"
+    ln -s ../external.md "$dir/.tickets/link02.md"
+    run_in_dir "$dir" "$TK" prune
+    assert_status 1
+    assert_contains "expected a regular file"
+    [[ -f "$dir/.tickets/keep01.md" ]] || fail "prune ignored a symlinked Markdown entry"
+    rm "$dir/.tickets/link02.md"
+
+    cat > "$dir/.tickets/"$'odd001\n'".md" <<'EOF'
+---
+id: odd001
+status: open
+deps: []
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Newline filename
+EOF
+    run_in_dir "$dir" "$TK" prune
+    assert_status 1
+    assert_contains "filename must be 6 lowercase letters or digits"
+    rm "$dir/.tickets/"$'odd001\n'".md"
+
+    cat > "$dir/.tickets/abc\\06123.md" <<'EOF'
+---
+id: abc123
+status: open
+deps: []
+created: 2026-03-20T00:00:00Z
+priority: 2
+---
+# Escaped filename
+EOF
+    run_in_dir "$dir" "$TK" prune
+    assert_status 1
+    assert_contains "filename must be 6 lowercase letters or digits"
+    rm "$dir/.tickets/abc\\06123.md"
+
+    write_ticket_file "$dir" refs01 open "References keep" "[keep01]"
+    chmod 300 "$dir/.tickets"
+    run_in_dir "$dir" "$TK" delete keep01
+    assert_status 1
+    assert_contains "cannot enumerate ticket store"
+    chmod 700 "$dir/.tickets"
+    [[ -f "$dir/.tickets/keep01.md" && -f "$dir/.tickets/refs01.md" ]] || fail "delete ran without enumerating the store"
+    rm "$dir/.tickets/refs01.md"
+
+    write_ticket_file "$dir" child1 open "Missing parent" "[]" 2 ghost1
+    run_in_dir "$dir" "$TK" add-note child1 "Must fail"
+    assert_status 1
+    assert_contains "references missing parent 'ghost1'"
+
+    rm "$dir/.tickets/child1.md"
+    write_ticket_file "$dir" task01 open "Missing dependency" "[ghost1]"
+    run_in_dir "$dir" "$TK" status task01 closed
+    assert_status 1
+    assert_contains "references missing dependency 'ghost1'"
+
+    rm -rf "$dir"
+}
+
+test_dependency_cycles_are_rejected_and_repairable() {
+    local dir a b c
+    dir=$(new_workspace)
+
+    run_in_dir "$dir" "$TK" create "A"
+    assert_status 0
+    a="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" create "B"
+    assert_status 0
+    b="$LAST_OUTPUT"
+    run_in_dir "$dir" "$TK" create "C"
+    assert_status 0
+    c="$LAST_OUTPUT"
+
+    run_in_dir "$dir" "$TK" dep "$a" "$b"
+    assert_status 0
+    run_in_dir "$dir" "$TK" dep "$b" "$a"
+    assert_status 1
+    assert_contains "dependency would create a cycle"
+    run_in_dir "$dir" "$TK" show "$b"
+    assert_status 0
+    assert_contains "deps: []"
+
+    run_in_dir "$dir" "$TK" dep "$b" "$c"
+    assert_status 0
+    run_in_dir "$dir" "$TK" dep "$c" "$a"
+    assert_status 1
+    assert_contains "dependency would create a cycle"
+    run_in_dir "$dir" "$TK" show "$c"
+    assert_status 0
+    assert_contains "deps: []"
+
+    rm -rf "$dir"
+    dir=$(new_workspace)
+    write_ticket_file "$dir" cyc001 open "Cycle one" "[cyc002]"
+    write_ticket_file "$dir" cyc002 open "Cycle two" "[cyc001]"
+
+    run_in_dir "$dir" "$TK" status cyc001 closed
+    assert_status 1
+    assert_contains "dependency cycle involving"
+    run_in_dir "$dir" "$TK" undep cyc001 cyc002
+    assert_status 0
+    assert_contains "Removed dependency"
+    run_in_dir "$dir" "$TK" status cyc001 closed
+    assert_status 0
+
+    rm -rf "$dir"
+}
+
 test_done_reports_completion_via_exit_status() {
     local dir open_id progress_id
     dir=$(new_workspace)
@@ -1185,6 +1488,10 @@ main() {
     run_test test_delete_refuses_referenced_tickets
     run_test test_prune_keeps_reachable_closed_tickets
     run_test test_prune_all_closed_returns_success
+    run_test test_prune_stops_on_late_parser_failure
+    run_test test_invalid_ticket_validation_blocks_mutations
+    run_test test_destructive_commands_fail_closed_on_invalid_store
+    run_test test_dependency_cycles_are_rejected_and_repairable
     run_test test_done_reports_completion_via_exit_status
     echo
     echo "Passed: $PASS_COUNT"

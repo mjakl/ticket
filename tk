@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+
+if (( ${BASH_VERSINFO[0]:-0} < 4 )); then
+    echo "Error: tk requires Bash 4 or newer" >&2
+    exit 1
+fi
+
 set -euo pipefail
 
 # ticket - minimal ticket system with dependency tracking
@@ -102,6 +108,7 @@ STORE_LOCK_PATH=""
 STORE_LOCK_TOKEN=""
 STORE_LAST_TEMP=""
 STORE_TEMP_FILES=()
+STORE_MD_ENTRIES=()
 
 release_store_lock() {
     [[ $STORE_LOCK_HELD -eq 1 ]] || return 0
@@ -245,10 +252,16 @@ set_new_ticket_mode() {
 }
 
 load_ticket_files() {
-    shopt -s nullglob
-    local -a candidates=("$TICKETS_DIR"/*.md)
-    shopt -u nullglob
+    if [[ -d "$TICKETS_DIR" && ( ! -r "$TICKETS_DIR" || ! -x "$TICKETS_DIR" ) ]]; then
+        printf "Error: cannot enumerate ticket store '%s'\n" "$TICKETS_DIR" >&2
+        return 1
+    fi
 
+    shopt -s nullglob dotglob
+    local -a candidates=("$TICKETS_DIR"/*.md)
+    shopt -u nullglob dotglob
+
+    STORE_MD_ENTRIES=("${candidates[@]}")
     TICKET_FILES=()
     local file
     for file in "${candidates[@]}"; do
@@ -284,7 +297,7 @@ ticket_path() {
 
     local file candidate
     local -a matches=()
-    load_ticket_files
+    load_ticket_files || return 1
     for file in "${TICKET_FILES[@]}"; do
         [[ -f "$file" && ! -L "$file" ]] || continue
         candidate=$(basename "$file" .md)
@@ -318,6 +331,190 @@ yaml_field() {
     ' "$file"
 }
 
+validate_ticket_file() {
+    local file="$1"
+    local expected_id="${2:-}"
+    if [[ -z "$expected_id" ]]; then
+        expected_id="${file##*/}"
+        expected_id="${expected_id%.md}"
+    fi
+
+    if [[ ! -f "$file" || -L "$file" ]]; then
+        printf "Error: invalid ticket '%s': expected a regular file\n" "$expected_id" >&2
+        return 1
+    fi
+    if [[ ! "$expected_id" =~ ^[a-z0-9]{6}$ ]]; then
+        printf "Error: invalid ticket '%s': filename must be 6 lowercase letters or digits\n" "$expected_id" >&2
+        return 1
+    fi
+
+    awk -v expected_id="$expected_id" '
+    function fail(message) {
+        if (!failed) printf "Error: invalid ticket \047%s\047: %s\n", expected_id, message > "/dev/stderr"
+        failed = 1
+        exit 1
+    }
+    function canonical_id(value) {
+        return length(value) == 6 && value ~ /^[a-z0-9]+$/
+    }
+    function remember(key, value) {
+        counts[key]++
+        if (counts[key] > 1) fail("duplicate " key " field")
+        fields[key] = value
+    }
+    index($0, "\r") { fail("CRLF line endings are not supported") }
+    NR == 1 {
+        if ($0 != "---") fail("missing opening frontmatter delimiter")
+        in_front = 1
+        next
+    }
+    in_front && $0 == "---" {
+        closed_front = 1
+        in_front = 0
+        next
+    }
+    in_front {
+        separator = index($0, ":")
+        if (!separator) next
+        key = substr($0, 1, separator - 1)
+        value = substr($0, separator + 1)
+        sub(/^ */, "", value)
+        sub(/ *$/, "", value)
+        if (key == "id" || key == "status" || key == "deps" || key == "created" || key == "priority" || key == "parent") {
+            remember(key, value)
+        }
+    }
+    END {
+        if (failed) exit 1
+        if (!closed_front) fail("missing closing frontmatter delimiter")
+
+        required[1] = "id"; required[2] = "status"; required[3] = "deps"
+        required[4] = "created"; required[5] = "priority"
+        for (i = 1; i <= 5; i++) {
+            key = required[i]
+            if (counts[key] != 1) fail("missing " key " field")
+        }
+
+        if (!canonical_id(fields["id"])) fail("id must be 6 lowercase letters or digits")
+        if (fields["id"] != expected_id) fail("filename does not match frontmatter id " fields["id"])
+        if (fields["status"] != "open" && fields["status"] != "in_progress" && fields["status"] != "closed") fail("invalid status " fields["status"])
+        if (fields["priority"] !~ /^[0-4]$/) fail("priority must be an integer from 0 to 4")
+        if (fields["created"] == "") fail("created field cannot be empty")
+        if (counts["parent"] == 1 && !canonical_id(fields["parent"])) fail("parent must be a 6-character ticket id")
+
+        deps = fields["deps"]
+        if (deps !~ /^\[.*\]$/) fail("invalid deps list")
+        sub(/^\[/, "", deps); sub(/\]$/, "", deps)
+        sub(/^ */, "", deps); sub(/ *$/, "", deps)
+        if (deps != "") {
+            count = split(deps, values, ",")
+            for (i = 1; i <= count; i++) {
+                dep = values[i]
+                sub(/^ */, "", dep); sub(/ *$/, "", dep)
+                if (!canonical_id(dep)) fail("dependency ids must be 6 lowercase letters or digits")
+                if (seen_dep[dep]++) fail("duplicate dependency " dep)
+            }
+        }
+    }
+    ' "$file"
+}
+
+dependency_values() {
+    local list="$1"
+    list="${list#[}"
+    list="${list%]}"
+    list="${list// /}"
+    [[ -z "$list" ]] && return 0
+
+    local value
+    local -a values
+    IFS=',' read -r -a values <<< "$list"
+    for value in "${values[@]}"; do
+        printf '%s\n' "$value"
+    done
+}
+
+dependency_reaches() {
+    local start="$1"
+    local target="$2"
+    local current file deps next
+    local head=0
+    local -a queue=("$start")
+    local -A seen=()
+
+    while [[ $head -lt ${#queue[@]} ]]; do
+        current="${queue[$head]}"
+        ((head += 1))
+        [[ "$current" == "$target" ]] && return 0
+        [[ -n "${seen[$current]:-}" ]] && continue
+        seen["$current"]=1
+
+        file="$TICKETS_DIR/$current.md"
+        [[ -f "$file" && ! -L "$file" ]] || continue
+        deps=$(yaml_field "$file" "deps") || return 2
+        while IFS= read -r next; do
+            [[ -n "$next" && -z "${seen[$next]:-}" ]] && queue+=("$next")
+        done < <(dependency_values "$deps")
+    done
+    return 1
+}
+
+validate_store() {
+    local mode="${1:-strict}"
+    load_ticket_files || return 1
+
+    local file id parent deps dep source reach_status
+    local -A present=()
+    for file in "${STORE_MD_ENTRIES[@]}"; do
+        validate_ticket_file "$file" || return 1
+        id="${file##*/}"
+        id="${id%.md}"
+        if [[ -n "${present[$id]:-}" ]]; then
+            printf "Error: duplicate ticket ID '%s'\n" "$id" >&2
+            return 1
+        fi
+        present["$id"]=1
+    done
+
+    for file in "${TICKET_FILES[@]}"; do
+        id="${file##*/}"
+        id="${id%.md}"
+        parent=$(yaml_field "$file" "parent") || return 1
+        if [[ -n "$parent" && -z "${present[$parent]:-}" ]]; then
+            printf "Error: ticket '%s' references missing parent '%s'\n" "$id" "$parent" >&2
+            return 1
+        fi
+
+        deps=$(yaml_field "$file" "deps") || return 1
+        while IFS= read -r dep; do
+            [[ -z "$dep" ]] && continue
+            if [[ "$mode" != "repair" && -z "${present[$dep]:-}" ]]; then
+                printf "Error: ticket '%s' references missing dependency '%s'\n" "$id" "$dep" >&2
+                return 1
+            fi
+        done < <(dependency_values "$deps")
+    done
+
+    if [[ "$mode" != "repair" ]]; then
+        for file in "${TICKET_FILES[@]}"; do
+            source="${file##*/}"
+            source="${source%.md}"
+            deps=$(yaml_field "$file" "deps") || return 1
+            while IFS= read -r dep; do
+                [[ -z "$dep" ]] && continue
+                if dependency_reaches "$dep" "$source"; then
+                    printf "Error: dependency cycle involving '%s' and '%s'\n" "$source" "$dep" >&2
+                    return 1
+                else
+                    reach_status=$?
+                    [[ $reach_status -eq 2 ]] && return 1
+                fi
+            done < <(dependency_values "$deps")
+        done
+    fi
+    return 0
+}
+
 # Update a YAML field through an atomic, permission-preserving replacement.
 update_yaml_field() {
     local file="$1"
@@ -348,6 +545,7 @@ update_yaml_field() {
     ' "$file" > "$tmp"; then
         return 1
     fi
+    validate_ticket_file "$tmp" "$(basename "$file" .md)" || return 1
     preserve_ticket_mode "$file" "$tmp"
     mv "$tmp" "$file"
 }
@@ -411,7 +609,7 @@ array_remove() {
 ticket_references() {
     local target="$1"
 
-    load_ticket_files
+    load_ticket_files || return 1
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && return 0
 
     awk -v target="$target" '
@@ -662,6 +860,7 @@ cmd_create() {
         return 1
     fi
     acquire_store_lock || return 1
+    validate_store strict || return 1
 
     # Resolve the parent while the store is locked.
     if [[ -n "$parent" ]]; then
@@ -701,6 +900,7 @@ cmd_create() {
         printf '# %s\n\n' "$title"
         [[ -n "$description" ]] && printf '%s\n\n' "$description"
     } > "$tmp"
+    validate_ticket_file "$tmp" "$id" || return 1
     set_new_ticket_mode "$tmp"
     mv "$tmp" "$file"
 
@@ -737,6 +937,7 @@ cmd_status() {
 
     validate_status "$status" || return 1
     acquire_store_lock || return 1
+    validate_store strict || return 1
 
     local file current_status resolved_id
     file=$(ticket_path "$id") || return 1
@@ -949,6 +1150,7 @@ cmd_dep() {
     local id="$1"
     local dep_id="$2"
     acquire_store_lock || return 1
+    validate_store strict || return 1
 
     local file
     file=$(ticket_path "$id") || return 1
@@ -971,6 +1173,16 @@ cmd_dep() {
     if array_contains "$current_deps" "$dep_id"; then
         echo "Dependency already exists"
         return 0
+    fi
+
+    local source_id
+    source_id=$(basename "$file" .md)
+    if dependency_reaches "$dep_id" "$source_id"; then
+        printf "Error: dependency would create a cycle: %s -> %s\n" "$source_id" "$dep_id" >&2
+        return 1
+    else
+        local reach_status=$?
+        [[ $reach_status -eq 2 ]] && return 1
     fi
 
     update_yaml_field "$file" "deps" "$(array_append "$current_deps" "$dep_id")"
@@ -1386,10 +1598,10 @@ ticket_outgoing_refs() {
     local file="$1"
     local parent deps dep_id
 
-    parent=$(yaml_field "$file" "parent")
+    parent=$(yaml_field "$file" "parent") || return 1
     [[ -n "$parent" ]] && printf '%s\n' "$parent"
 
-    deps=$(yaml_field "$file" "deps")
+    deps=$(yaml_field "$file" "deps") || return 1
     deps="${deps#[}"
     deps="${deps%]}"
     deps="${deps// /}"
@@ -1413,6 +1625,7 @@ cmd_prune() {
     fi
 
     acquire_store_lock || return 1
+    validate_store strict || return 1
     load_ticket_files
     [[ ${#TICKET_FILES[@]} -eq 0 ]] && {
         echo "No closed tickets to prune"
@@ -1421,7 +1634,7 @@ cmd_prune() {
 
     local -A file_by_id=() reachable=()
     local -a closed_ids=() queue=()
-    local file id status current ref_id
+    local file id status current ref_id outgoing_refs
     local head=0 count=0 retained=0
 
     for file in "${TICKET_FILES[@]}"; do
@@ -1450,10 +1663,11 @@ cmd_prune() {
         file="${file_by_id[$current]:-}"
         [[ -z "$file" ]] && continue
 
+        outgoing_refs=$(ticket_outgoing_refs "$file") || return 1
         while IFS= read -r ref_id; do
             [[ -z "$ref_id" || -z "${file_by_id[$ref_id]:-}" || -n "${reachable[$ref_id]:-}" ]] && continue
             queue+=("$ref_id")
-        done < <(ticket_outgoing_refs "$file")
+        done <<< "$outgoing_refs"
     done
 
     for id in "${closed_ids[@]}"; do
@@ -1484,11 +1698,12 @@ cmd_delete() {
     fi
 
     acquire_store_lock || return 1
+    validate_store strict || return 1
 
     local file id refs
     file=$(ticket_path "$1") || return 1
     id=$(basename "$file" .md)
-    refs=$(ticket_references "$id")
+    refs=$(ticket_references "$id") || return 1
 
     if [[ -n "$refs" ]]; then
         echo "Error: cannot delete $id ($(format_references "$refs"))" >&2
@@ -1601,6 +1816,7 @@ cmd_undep() {
     local id="$1"
     local dep_id="$2"
     acquire_store_lock || return 1
+    validate_store repair || return 1
 
     local file
     file=$(ticket_path "$id") || return 1
@@ -1840,6 +2056,7 @@ cmd_add_note() {
     fi
 
     acquire_store_lock || return 1
+    validate_store strict || return 1
 
     local file tmp timestamp
     file=$(ticket_path "$id") || return 1
@@ -1851,6 +2068,7 @@ cmd_add_note() {
         printf '\n## Notes\n' >> "$tmp"
     fi
     printf '\n**%s**\n\n%s\n' "$timestamp" "$note" >> "$tmp"
+    validate_ticket_file "$tmp" "$(basename "$file" .md)" || return 1
     preserve_ticket_mode "$file" "$tmp"
     mv "$tmp" "$file"
 
@@ -1991,6 +2209,7 @@ EOF
             cat << EOF
 
 Add a blocking dependency: <id> depends on <dependency-id>.
+Direct and transitive dependency cycles are rejected.
 Use '$cmd dep tree --help' for dependency-tree options.
 
 Example:
